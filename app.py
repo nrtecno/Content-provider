@@ -8,13 +8,19 @@ from flask import Flask, request, Response, send_from_directory, jsonify, abort
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Update
 
-# ---------- Config ----------
+# ---------- Config (Sab kuch Environment Variables se aayega) ----------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DEST_CHANNEL = int(os.getenv("DEST_CHANNEL", "0"))
 STORAGE_CHANNEL = int(os.getenv("STORAGE_CHANNEL", "0")) 
 PUBLIC_URL = os.getenv("PUBLIC_URL", "").rstrip("/")
 ADMIN_KEY = os.getenv("ADMIN_KEY", "test123")
 APP_SHORT_NAME = os.getenv("APP_SHORT_NAME", "Watch")
+
+# Frontend Variables
+BOT_USERNAME = os.getenv("BOT_USERNAME", "") # Naya
+MONETAG_ZONE = os.getenv("MONETAG_ZONE", "") # Naya
+CHANNEL_LINK = os.getenv("CHANNEL_LINK", "https://t.me/telegram") # Naya
+CHANNEL_NAME = os.getenv("CHANNEL_NAME", "Join Our Channel") # Naya
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN env variable missing")
@@ -42,29 +48,25 @@ def handle_start(message):
     if len(args) > 1:
         vid_id = args[1]
         entry = video_db.get(vid_id)
-        
         if entry:
             bot.send_message(message.chat.id, "✅ Here is your requested video. Enjoy!")
             try:
-                # बॉट सीधे स्टोरेज चैनल से वीडियो यूजर को भेजेगा
                 bot.send_video(message.chat.id, entry["video"])
             except Exception as e:
                 bot.send_message(message.chat.id, f"❌ Error sending video: {e}")
         else:
-            bot.send_message(message.chat.id, "❌ Video not found or link expired.")
+            bot.send_message(message.chat.id, "❌ Video not found.")
     else:
-        bot.send_message(message.chat.id, "👋 Welcome! Send me a Photo and Video **together** to generate a new link.")
+        bot.send_message(message.chat.id, "👋 Welcome! Please send me a Photo and Video **together** to generate a new link.")
 
 @bot.message_handler(content_types=["photo", "video"])
 def handle_bot_upload(message):
     if not message.media_group_id:
         bot.reply_to(message, "⚠️ Please send the Photo and Video **together** as an album.")
         return
-
     mgid = message.media_group_id
     with buffer_lock:
         media_buffer.setdefault(mgid, []).append(message)
-
     threading.Timer(3.0, process_upload, args=[mgid, message.chat.id]).start()
 
 def process_upload(mgid, chat_id):
@@ -80,38 +82,30 @@ def process_upload(mgid, chat_id):
         return
 
     unique_id = uuid.uuid4().hex[:10].upper()
-    
-    # 1. स्टोरेज चैनल में कॉपी करें और कैप्शन में ID डालें
     safe_video_id = video_msg.video.file_id
     safe_photo_id = photo_msg.photo[-1].file_id
 
     if STORAGE_CHANNEL != 0:
         try:
-            # वीडियो कॉपी और कैप्शन एडिट
+            # Storage me copy karein aur edit karein
             vid_copy = bot.copy_message(STORAGE_CHANNEL, chat_id, video_msg.message_id)
             bot.edit_message_caption(chat_id=STORAGE_CHANNEL, message_id=vid_copy.message_id, caption=f"🎥 Video ID: `{unique_id}`", parse_mode="Markdown")
             safe_video_id = vid_copy.video.file_id
             
-            # थंबनेल कॉपी और कैप्शन एडिट
             photo_copy = bot.copy_message(STORAGE_CHANNEL, chat_id, photo_msg.message_id)
             bot.edit_message_caption(chat_id=STORAGE_CHANNEL, message_id=photo_copy.message_id, caption=f"🖼 Thumbnail ID: `{unique_id}`", parse_mode="Markdown")
             safe_photo_id = photo_copy.photo[-1].file_id
-            
-            print(f"✅ Stored in Cloud with ID: {unique_id}")
         except Exception as e:
             print(f"⚠️ Cloud storage failed: {e}")
 
-    # 2. डेटाबेस में सेव करें
     video_db[unique_id] = {"video": safe_video_id, "thumb": safe_photo_id}
     save_db(video_db)
 
-    # 3. डेस्टिनेशन चैनल में भेजें (मिनी ऐप बटन के साथ)
     bot_username = bot.get_me().username
     mini_app_url = f"https://t.me/{bot_username}/{APP_SHORT_NAME}?startapp={unique_id}"
 
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("👉 Play Online Free 🍑💦", url=mini_app_url))
-
     caption_text = "🎬 Watch this video for FREE!\n\n▶️ Tap the button below to play instantly"
 
     try:
@@ -119,7 +113,6 @@ def process_upload(mgid, chat_id):
         bot.send_message(chat_id, f"✅ Uploaded successfully!\nYour Video ID is: `{unique_id}`", parse_mode="Markdown")
     except Exception as e:
         bot.send_message(chat_id, f"❌ Failed to send to channel. Error: {e}")
-
 
 # ---------- Flask Routes ----------
 @app.route("/health")
@@ -133,8 +126,19 @@ def webhook():
         return "", 200
     return "", 403
 
+# Yahan hum HTML file ko read karke Environment Variables inject kar rahe hain
 @app.route("/miniapp")
-def miniapp_page(): return send_from_directory("static", "miniapp.html")
+def miniapp_page():
+    with open(os.path.join("static", "miniapp.html"), "r", encoding="utf-8") as f:
+        html_content = f.read()
+    
+    # Variables ko HTML me replace karein
+    html_content = html_content.replace("__BOT_USERNAME__", BOT_USERNAME)
+    html_content = html_content.replace("__MONETAG_ZONE__", MONETAG_ZONE)
+    html_content = html_content.replace("__CHANNEL_LINK__", CHANNEL_LINK)
+    html_content = html_content.replace("__CHANNEL_NAME__", CHANNEL_NAME)
+    
+    return Response(html_content, mimetype="text/html")
 
 @app.route("/thumb/<vid_id>")
 def get_thumbnail(vid_id):

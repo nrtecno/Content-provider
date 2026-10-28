@@ -10,12 +10,8 @@
 <!-- 1. MONETAG SDK -->
 <script src='//libtl.com/sdk.js' data-zone='__MONETAG_ZONE__' data-sdk='show___MONETAG_ZONE__'></script>
 
-<!-- 2. TADS SDK (Render se load hoga) -->
-<script>
-  if ('__TADS_SDK_URL__' && '__TADS_SDK_URL__' !== '') {
-    document.write('<script src="' + '__TADS_SDK_URL__' + '"><\/script>');
-  }
-</script>
+<!-- 2. ADSGRAM SDK -->
+<script src="https://sad.adsgram.ai/js/sad.min.js"></script>
 
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -87,8 +83,14 @@
   if (!vidId) { displayId.textContent = "ERROR"; playBtn.disabled = true; return; }
   displayId.textContent = vidId;
 
-  // TADS Widget ID (Injected)
-  const tadsWidgetId = "__TADS_WIDGET_ID__";
+  // Adsgram Initialize
+  let AdController = null;
+  try {
+    if (window.Adsgram) {
+      // Block ID Render se inject hoga
+      AdController = window.Adsgram.init({ blockId: "__ADSGRAM_BLOCK_ID__" });
+    }
+  } catch (e) { console.warn('Adsgram init failed', e); }
 
   playBtn.addEventListener('click', function() {
     playBtn.disabled = true;
@@ -97,9 +99,10 @@
 
     let adFinished = false; 
 
+    // 4 सेकंड का टाइमर (Monetag के लिए)
     const monetagTimeout = setTimeout(() => {
-        if (!adFinished) { tryTads(); }
-    }, 4000); // 4 seconds for Monetag
+        if (!adFinished) { tryAdsgram(); }
+    }, 4000);
 
     // 🟢 NETWORK 1: MONETAG
     const monetagFunc = window['show___MONETAG_ZONE__'];
@@ -112,37 +115,27 @@
         }).catch(() => {
             adFinished = true;
             clearTimeout(monetagTimeout);
-            tryTads(); 
+            tryAdsgram(); 
         });
     } else {
         clearTimeout(monetagTimeout);
-        tryTads();
+        tryAdsgram();
     }
   });
 
-  // 🔵 NETWORK 2: TADS Fallback
-  function tryTads() {
-      if (tadsWidgetId && tadsWidgetId !== "" && tadsWidgetId !== "__TADS_WIDGET_ID__") {
+  // 🔵 NETWORK 2: ADSGRAM (Fallback)
+  function tryAdsgram() {
+      if (AdController) {
           statusOverlay.innerHTML = 'Loading Ad...<br><span style="font-size:11px;color:#aaa;">Network 2</span>';
-          
-          // TADS API Call
-          if (window.tads && typeof window.tads.show === 'function') {
-              // TADS fullscreen show function
-              window.tads.show({ id: tadsWidgetId }).then(() => {
-                  statusOverlay.style.display = 'none';
-                  showRevealScreen();
-              }).catch(() => {
-                  statusOverlay.style.display = 'none';
-                  showRevealScreen(); // Fallback to video
-              });
-          } else {
-              // Agar TADS SDK load nahi hua
-              console.warn("TADS SDK not loaded.");
+          AdController.show().then(() => {
               statusOverlay.style.display = 'none';
               showRevealScreen();
-          }
+          }).catch(() => {
+              statusOverlay.style.display = 'none';
+              showRevealScreen(); // अगर Adsgram भी फेल हो जाए
+          });
       } else {
-          // Agar ID nahi daali hai
+          // अगर Adsgram कॉन्फ़िगर नहीं है
           statusOverlay.style.display = 'none';
           showRevealScreen();
       }

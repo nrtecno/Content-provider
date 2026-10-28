@@ -5,13 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
 <title>Nebula Video Player</title>
 
-<!-- Telegram Web App SDK -->
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
-<!-- 1. MONETAG SDK -->
-<script src='//libtl.com/sdk.js' data-zone='12127485' data-sdk='show_12127485'></script>
+<!-- MONETAG SDK (Zone dynamically inject hoga) -->
+<script src='//libtl.com/sdk.js' data-zone='__MONETAG_ZONE__' data-sdk='show___MONETAG_ZONE__'></script>
 
-<!-- 2. TADS SDK (यहाँ अपना TADS स्क्रिप्ट पेस्ट करें) -->
+<!-- TADS SDK (यहाँ अपना TADS स्क्रिप्ट पेस्ट करें) -->
 <!-- <script src="https://YOUR_TADS_SCRIPT.js"></script> -->
 
 <style>
@@ -26,22 +25,15 @@
   
   .main-content { padding: 0 20px; display: flex; flex-direction: column; align-items: center; flex-grow: 1; justify-content: center; }
   
-  /* String Box */
-  .ticket-box {
-    background: #1e1e1e; border: 1px dashed #444;
-    border-radius: 12px; padding: 15px 30px; margin-bottom: 20px;
-    text-align: center; width: 100%; max-width: 300px;
-  }
+  .ticket-box { background: #1e1e1e; border: 1px dashed #444; border-radius: 12px; padding: 15px 30px; margin-bottom: 20px; text-align: center; width: 100%; max-width: 300px; }
   .ticket-box p { margin: 0 0 5px; font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 1px;}
   .ticket-box h3 { margin: 0; font-family: monospace; font-size: 24px; color: #2ea6ff; letter-spacing: 2px;}
 
-  /* Reveal Screen */
   #video-reveal-screen { display: none; flex-direction: column; align-items: center; width: 100%; animation: fadeIn 0.5s; }
   .thumbnail-box { width: 100%; max-width: 300px; aspect-ratio: 16/9; background: #18181b; border-radius: 16px; overflow: hidden; border: 2px solid #27272a; margin-bottom: 20px; }
   .thumbnail-box img { width: 100%; height: 100%; object-fit: cover; }
   .play-redirect-btn { background: linear-gradient(90deg, #06b6d4, #3b82f6); color: #fff; border: none; padding: 16px; border-radius: 12px; font-weight: 700; font-size: 16px; cursor: pointer; width: 100%; max-width: 300px; box-shadow: 0 5px 20px rgba(59, 130, 246, 0.4); }
   
-  /* Start Button */
   .play-btn-main { background: linear-gradient(90deg, #06b6d4, #3b82f6); color: #fff; border: none; padding: 15px 40px; border-radius: 10px; font-weight: 700; font-size: 18px; cursor: pointer; width: 100%; max-width: 300px; }
   
   #status-overlay { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); padding: 20px 30px; border-radius: 12px; color: #fff; font-size: 15px; display: none; z-index: 1000; text-align: center; border: 1px solid #333; width: 200px;}
@@ -51,13 +43,13 @@
 <body>
 <div id="status-overlay">Loading Ad...</div>
 
-<a href="https://t.me/nr_hackz" target="_blank" class="top-banner">
-  <div class="banner-text">💎 Super Tech Channel<br><span>Join @nr_hackz for premium tech & hacks!</span></div>
+<!-- Top Banner (Dynamically injected) -->
+<a href="__CHANNEL_LINK__" target="_blank" class="top-banner">
+  <div class="banner-text">💎 __CHANNEL_NAME__<br><span>Join us for premium updates!</span></div>
   <div class="banner-btn">Join Now →</div>
 </a>
 
 <div class="main-content">
-  <!-- Screen 1: String Box & Play -->
   <div id="initial-screen" style="text-align: center; width: 100%; display: flex; flex-direction: column; align-items: center;">
     <div class="ticket-box">
       <p>Video ID</p>
@@ -67,7 +59,6 @@
     <button id="play-trigger-btn" class="play-btn-main">▶ Play</button>
   </div>
 
-  <!-- Screen 2: Thumbnail & Bot Redirect -->
   <div id="video-reveal-screen">
     <div class="thumbnail-box"><img id="thumb-img" src="" alt="Thumbnail"></div>
     <button id="redirect-btn" class="play-redirect-btn">▶ Play Video on Bot</button>
@@ -91,12 +82,10 @@
   const statusOverlay = document.getElementById('status-overlay');
 
   if (!vidId) { displayId.textContent = "ERROR"; playBtn.disabled = true; return; }
-  
-  // बॉक्स में ID दिखाएं
   displayId.textContent = vidId;
 
-  // TADS INITIALIZATION (अगर आपके पास TADS ऑब्जेक्ट है तो यहाँ सेट करें)
-  const tadsAd = null; // उदाहरण: new TADS.Widget(...)
+  // TADS INITIALIZATION (Agar aap multi-bot me TADS use karna chahte hain, toh ise bhi env var se le sakte hain)
+  const tadsAd = null; 
 
   playBtn.addEventListener('click', function() {
     playBtn.disabled = true;
@@ -105,16 +94,15 @@
 
     let adFinished = false; 
 
-    // 4 सेकंड का टाइमर (Monetag के लिए)
     const monetagTimeout = setTimeout(() => {
-        if (!adFinished) {
-            tryTads(); // 4 सेकंड में नहीं आया तो TADS
-        }
+        if (!adFinished) { tryTads(); }
     }, 4000);
 
-    // Monetag Ad Trigger
-    if (typeof show_12127485 === 'function') {
-        show_12127485().then(() => {
+    // Monetag Function Call (Dynamic Zone ID)
+    const monetagFunc = window['show___MONETAG_ZONE__'];
+    
+    if (typeof monetagFunc === 'function') {
+        monetagFunc().then(() => {
             adFinished = true;
             clearTimeout(monetagTimeout);
             statusOverlay.style.display = 'none';
@@ -130,7 +118,6 @@
     }
   });
 
-  // TADS Fallback
   function tryTads() {
       if (tadsAd) {
           statusOverlay.innerHTML = 'Loading Ad...<br><span style="font-size:11px;color:#aaa;">Network 2</span>';
@@ -139,7 +126,7 @@
               showRevealScreen();
           }).catch(() => {
               statusOverlay.style.display = 'none';
-              showRevealScreen(); // दोनों फेल होने पर वीडियो स्क्रीन
+              showRevealScreen();
           });
       } else {
           statusOverlay.style.display = 'none';
@@ -147,17 +134,15 @@
       }
   }
 
-  // Ad के बाद वाली स्क्रीन (Thumbnail + Play on Bot)
   function showRevealScreen() {
     initialScreen.style.display = 'none';
     revealScreen.style.display = 'flex';
     thumbImg.src = '/thumb/' + encodeURIComponent(vidId);
   }
 
-  // बॉट पर रीडायरेक्ट
   redirectBtn.addEventListener('click', function() {
-    // ⚠️ यहाँ अपना नया बॉट यूज़रनेम डालें (बिना @ के) ⚠️
-    const botUsername = "YOUR_NEW_BOT_USERNAME"; 
+    // Bot Username (Dynamic Injection)
+    const botUsername = "__BOT_USERNAME__"; 
     const botLink = `https://t.me/${botUsername}?start=${vidId}`;
     if (tg) { tg.openTelegramLink(botLink); } else { window.open(botLink, '_blank'); }
   });

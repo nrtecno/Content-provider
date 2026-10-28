@@ -8,7 +8,7 @@ from flask import Flask, request, Response, send_from_directory, jsonify, abort
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Update
 
-# ---------- Config (Sab kuch Environment Variables se aayega) ----------
+# ---------- Config ----------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DEST_CHANNEL = int(os.getenv("DEST_CHANNEL", "0"))
 STORAGE_CHANNEL = int(os.getenv("STORAGE_CHANNEL", "0")) 
@@ -16,11 +16,13 @@ PUBLIC_URL = os.getenv("PUBLIC_URL", "").rstrip("/")
 ADMIN_KEY = os.getenv("ADMIN_KEY", "test123")
 APP_SHORT_NAME = os.getenv("APP_SHORT_NAME", "Watch")
 
-# Frontend Variables
-BOT_USERNAME = os.getenv("BOT_USERNAME", "") # Naya
-MONETAG_ZONE = os.getenv("MONETAG_ZONE", "") # Naya
-CHANNEL_LINK = os.getenv("CHANNEL_LINK", "https://t.me/telegram") # Naya
-CHANNEL_NAME = os.getenv("CHANNEL_NAME", "Join Our Channel") # Naya
+# Frontend Variables (Render se aayenge)
+BOT_USERNAME = os.getenv("BOT_USERNAME", "")
+MONETAG_ZONE = os.getenv("MONETAG_ZONE", "")
+CHANNEL_LINK = os.getenv("CHANNEL_LINK", "https://t.me/telegram")
+CHANNEL_NAME = os.getenv("CHANNEL_NAME", "Join Our Channel")
+TADS_WIDGET_ID = os.getenv("TADS_WIDGET_ID", "")
+TADS_SDK_URL = os.getenv("TADS_SDK_URL", "")
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN env variable missing")
@@ -87,7 +89,6 @@ def process_upload(mgid, chat_id):
 
     if STORAGE_CHANNEL != 0:
         try:
-            # Storage me copy karein aur edit karein
             vid_copy = bot.copy_message(STORAGE_CHANNEL, chat_id, video_msg.message_id)
             bot.edit_message_caption(chat_id=STORAGE_CHANNEL, message_id=vid_copy.message_id, caption=f"🎥 Video ID: `{unique_id}`", parse_mode="Markdown")
             safe_video_id = vid_copy.video.file_id
@@ -126,17 +127,17 @@ def webhook():
         return "", 200
     return "", 403
 
-# Yahan hum HTML file ko read karke Environment Variables inject kar rahe hain
 @app.route("/miniapp")
 def miniapp_page():
     with open(os.path.join("static", "miniapp.html"), "r", encoding="utf-8") as f:
         html_content = f.read()
     
-    # Variables ko HTML me replace karein
     html_content = html_content.replace("__BOT_USERNAME__", BOT_USERNAME)
     html_content = html_content.replace("__MONETAG_ZONE__", MONETAG_ZONE)
     html_content = html_content.replace("__CHANNEL_LINK__", CHANNEL_LINK)
     html_content = html_content.replace("__CHANNEL_NAME__", CHANNEL_NAME)
+    html_content = html_content.replace("__TADS_WIDGET_ID__", TADS_WIDGET_ID)
+    html_content = html_content.replace("__TADS_SDK_URL__", TADS_SDK_URL)
     
     return Response(html_content, mimetype="text/html")
 

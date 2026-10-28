@@ -1,203 +1,230 @@
-import os
-import time
-import threading
-import requests
-import json
-from flask import Flask, request, Response, send_from_directory, jsonify, abort
-import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Update
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Video Player</title>
 
-# ---------- Config ----------
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-DEST_CHANNEL = int(os.getenv("DEST_CHANNEL", "0"))
-STORAGE_CHANNEL = int(os.getenv("STORAGE_CHANNEL", "0"))
-PUBLIC_URL = os.getenv("PUBLIC_URL", "").rstrip("/")
-ADMIN_KEY = os.getenv("ADMIN_KEY", "test123")
-APP_SHORT_NAME = os.getenv("APP_SHORT_NAME", "Wach")
+<!-- Telegram Web App SDK -->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 
-BOT_USERNAME = os.getenv("BOT_USERNAME", "")
-MONETAG_ZONE = os.getenv("MONETAG_ZONE", "")
-CHANNEL_LINK = os.getenv("CHANNEL_LINK", "https://t.me/nr_hackz")
-CHANNEL_NAME = os.getenv("CHANNEL_NAME", "Super Tech Channel")
-ADSGRAM_BLOCK_ID = os.getenv("ADSGRAM_BLOCK_ID", "")
+<!-- 1. MONETAG SDK (Zone ID dynamically inject hoga) -->
+<script src='//libtl.com/sdk.js' data-zone='__MONETAG_ZONE__' data-sdk='show___MONETAG_ZONE__'></script>
 
-if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN env variable missing")
+<!-- 2. ADSGRAM SDK -->
+<script src="https://sad.adsgram.ai/js/sad.min.js"></script>
 
-bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
-app = Flask(__name__, static_folder="static")
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background-color: #09090b; color: #fff; font-family: 'Inter', sans-serif; min-height: 100vh; display: flex; flex-direction: column; overflow: hidden;}
+  
+  /* Top Channel Banner */
+  .top-banner { background: linear-gradient(90deg, #4f46e5, #9333ea); padding: 12px 15px; margin: 15px; border-radius: 12px; display: flex; align-items: center; justify-content: space-between; text-decoration: none; color: white; }
+  .banner-text { font-size: 13px; font-weight: 600; }
+  .banner-text span { font-weight: 400; font-size: 11px; color: #e9d5ff; display: block; }
+  .banner-btn { background: #fff; color: #4f46e5; padding: 6px 12px; border-radius: 8px; font-weight: 700; font-size: 12px; }
+  
+  /* Main Content Area */
+  .main-content { padding: 0 20px; display: flex; flex-direction: column; align-items: center; flex-grow: 1; justify-content: center; }
+  
+  /* Video ID Ticket Box */
+  .ticket-box { background: #1e1e1e; border: 1px dashed #444; border-radius: 12px; padding: 15px 30px; margin-bottom: 20px; text-align: center; width: 100%; max-width: 300px; }
+  .ticket-box p { margin: 0 0 5px; font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 1px;}
+  .ticket-box h3 { margin: 0; font-family: monospace; font-size: 22px; color: #2ea6ff; letter-spacing: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
 
-media_buffer = {}
-buffer_lock = threading.Lock()
+  /* Reveal Screen (Hidden Initially) */
+  #video-reveal-screen { display: none; flex-direction: column; align-items: center; width: 100%; animation: fadeIn 0.5s; }
+  
+  /* Real Thumbnail Box */
+  .thumbnail-box { 
+      width: 100%; max-width: 300px; aspect-ratio: 16/9; 
+      background: #18181b; 
+      border-radius: 16px; overflow: hidden; border: 2px solid #3f3f46; 
+      margin-bottom: 20px; display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  }
+  .thumbnail-box img { width: 100%; height: 100%; object-fit: cover; }
+  
+  /* Redirect Button */
+  .play-redirect-btn { background: linear-gradient(90deg, #06b6d4, #3b82f6); color: #fff; border: none; padding: 16px; border-radius: 12px; font-weight: 700; font-size: 16px; cursor: pointer; width: 100%; max-width: 300px; box-shadow: 0 5px 20px rgba(59, 130, 246, 0.4); }
+  
+  /* Player Buttons */
+  .btn-group { display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 300px; }
+  
+  .play-btn-main { 
+      background: linear-gradient(90deg, #06b6d4, #3b82f6); color: #fff; border: none; 
+      padding: 15px 20px; border-radius: 10px; font-weight: 700; font-size: 16px; 
+      cursor: pointer; width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;
+      box-shadow: 0 4px 15px rgba(6, 182, 212, 0.3); transition: 0.2s; position: relative;
+  }
+  .play-btn-main:active { transform: scale(0.98); }
+  .play-btn-main:disabled { opacity: 0.5; cursor: not-allowed; }
 
-# ---------- Local JSON Cache for Thumbnails ----------
-DB_FILE = "data.json"
-def load_db():
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, "r") as f: return json.load(f)
-        except: return {}
-    return {}
+  .btn-adsgram { background: linear-gradient(90deg, #8b5cf6, #d946ef); box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3); }
 
-def save_db(data):
-    with open(DB_FILE, "w") as f: json.dump(data, f)
+  /* BEST Badge Styling */
+  .best-badge {
+      background: #22c55e; color: #fff; font-size: 10px; padding: 3px 8px;
+      border-radius: 20px; margin-left: 5px; font-weight: 800;
+      box-shadow: 0 2px 5px rgba(34, 197, 94, 0.4); animation: pulse 1.5s infinite;
+  }
 
-# ---------- Auto Delete Function ----------
-def delete_message_after_delay(chat_id, message_id, delay_seconds):
-    time.sleep(delay_seconds)
-    try:
-        bot.delete_message(chat_id, message_id)
-        print(f"🗑️ Auto-deleted video (Message ID: {message_id}) from chat {chat_id}")
-    except Exception as e:
-        print(f"⚠️ Failed to delete message: {e}")
+  @keyframes pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.1); box-shadow: 0 0 10px #22c55e; }
+      100% { transform: scale(1); }
+  }
+  
+  /* Loading Overlay */
+  #status-overlay { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.95); padding: 20px 30px; border-radius: 12px; color: #fff; font-size: 15px; display: none; z-index: 1000; text-align: center; border: 1px solid #333; width: 220px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);}
+  
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+</head>
+<body>
 
-# ---------- Bot Handlers ----------
-@bot.message_handler(commands=['start'])
-def handle_start(message):
-    args = message.text.split()
-    if len(args) > 1:
-        try:
-            unique_id = args[1] 
-            chat_id = message.chat.id
-            
-            warning_text = (
-                "<blockquote>📥 <b>forward anyone & save....</b>\n\n"
-                "The video will be removed from here in 10 minutes.</blockquote>"
-            )
-            bot.send_message(chat_id, warning_text, parse_mode="HTML")
-            
-            video_db = load_db()
-            entry = video_db.get(unique_id)
-            
-            if entry and "video" in entry:
-                sent_video = bot.send_video(chat_id, entry["video"])
-            else:
-                # Agar JSON delete ho gaya hai, toh Storage Channel se direct copy karein
-                sent_video = bot.copy_message(
-                    chat_id=chat_id, 
-                    from_chat_id=STORAGE_CHANNEL, 
-                    message_id=int(unique_id)
-                )
-            
-            timer = threading.Thread(
-                target=delete_message_after_delay, 
-                args=(chat_id, sent_video.message_id, 600)
-            )
-            timer.daemon = True
-            timer.start()
-            
-        except Exception as e:
-            bot.send_message(message.chat.id, "❌ Video not found or deleted.")
-            print(f"Error fetching: {e}")
-    else:
-        bot.send_message(message.chat.id, "👋 Welcome! Send me a Photo and Video **together** to generate a new link.")
+<!-- Loading Overlay -->
+<div id="status-overlay">Loading Ad...<br><span style="font-size:11px;color:#aaa;">Please wait...</span></div>
 
-@bot.message_handler(content_types=["photo", "video"])
-def handle_bot_upload(message):
-    if not message.media_group_id:
-        bot.reply_to(message, "⚠️ Please send the Photo and Video **together** as an album.")
-        return
-    mgid = message.media_group_id
-    with buffer_lock:
-        media_buffer.setdefault(mgid, []).append(message)
-    threading.Timer(3.0, process_upload, args=[mgid, message.chat.id]).start()
+<!-- Channel Banner (Dynamically Injected) -->
+<a href="__CHANNEL_LINK__" target="_blank" class="top-banner">
+  <div class="banner-text">💎 __CHANNEL_NAME__<br><span>Join us for premium updates!</span></div>
+  <div class="banner-btn">Join Now →</div>
+</a>
 
-def process_upload(mgid, chat_id):
-    with buffer_lock:
-        msgs = media_buffer.pop(mgid, [])
-    if not msgs: return
+<div class="main-content">
+  <!-- SCREEN 1: Video ID & Player Selection -->
+  <div id="initial-screen" style="text-align: center; width: 100%; display: flex; flex-direction: column; align-items: center;">
+    <div class="ticket-box">
+      <p>Video ID</p>
+      <h3 id="display-id">LOADING...</h3>
+    </div>
+    <p style="color: #a1a1aa; font-size: 13px; margin-bottom: 20px;">Select a player & watch the ad to unlock your video</p>
+    
+    <div class="btn-group">
+        <button id="btn-player1" class="play-btn-main">
+            ▶ Player 1 (Monetag Ad) <span class="best-badge">🔥 BEST</span>
+        </button>
+        <button id="btn-player2" class="play-btn-main btn-adsgram">
+            ▶ Player 2 (Adsgram Ad)
+        </button>
+    </div>
+  </div>
 
-    photo_msg = next((m for m in msgs if m.content_type == "photo"), None)
-    video_msg = next((m for m in msgs if m.content_type == "video"), None)
+  <!-- SCREEN 2: Unlocked (Thumbnail & Redirect) -->
+  <div id="video-reveal-screen">
+    <div class="thumbnail-box"><img id="thumb-img" src="" alt="Loading Thumbnail..."></div>
+    <button id="redirect-btn" class="play-redirect-btn">▶ Play Video on Bot</button>
+    <p style="color: #71717a; font-size: 12px; margin-top: 15px; text-align: center;">You will be redirected to our Bot to receive the video securely.</p>
+  </div>
+</div>
 
-    if not photo_msg or not video_msg:
-        bot.send_message(chat_id, "❌ Error: Please send exactly 1 Photo and 1 Video together.")
-        return
+<script>
+(function () {
+  const tg = window.Telegram && window.Telegram.WebApp;
+  if (tg) { try { tg.ready(); tg.expand(); } catch(e){} }
 
-    # 🟢 असली File IDs यहाँ से निकालेंगे
-    original_video_id = video_msg.video.file_id
-    original_photo_id = photo_msg.photo[-1].file_id
+  // URL ya Telegram startapp se Video ID nikaalein
+  let vidId = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) ? tg.initDataUnsafe.start_param : new URLSearchParams(window.location.search).get('id');
+  
+  const displayId = document.getElementById('display-id');
+  const btnPlayer1 = document.getElementById('btn-player1');
+  const btnPlayer2 = document.getElementById('btn-player2');
+  const initialScreen = document.getElementById('initial-screen');
+  const revealScreen = document.getElementById('video-reveal-screen');
+  const thumbImg = document.getElementById('thumb-img');
+  const redirectBtn = document.getElementById('redirect-btn');
+  const statusOverlay = document.getElementById('status-overlay');
 
-    try:
-        # Storage Channel में कॉपी करें और सिर्फ Message ID (Number) निकालें
-        vid_copy = bot.copy_message(STORAGE_CHANNEL, chat_id, video_msg.message_id)
-        unique_id = str(vid_copy.message_id) # यही हमारी Short ID है (जैसे: 152)
+  if (!vidId) { displayId.textContent = "ERROR"; btnPlayer1.disabled = true; btnPlayer2.disabled = true; return; }
+  
+  // ID ko screen par dikhayein
+  displayId.textContent = vidId;
+
+  // Initialize Adsgram
+  let AdController = null;
+  try {
+    if (window.Adsgram) {
+      AdController = window.Adsgram.init({ blockId: "__ADSGRAM_BLOCK_ID__" });
+    }
+  } catch (e) { console.warn('Adsgram init failed', e); }
+
+  // --- PLAYER 1: MONETAG AD (Strict) ---
+  btnPlayer1.addEventListener('click', function() {
+    btnPlayer1.disabled = true;
+    btnPlayer2.disabled = true;
+    statusOverlay.style.display = 'block';
+    statusOverlay.innerHTML = 'Loading Monetag Ad...';
+
+    if (typeof window['show___MONETAG_ZONE__'] === 'function') {
+        window['show___MONETAG_ZONE__']().then(() => {
+            // Ad Watched Successfully
+            statusOverlay.style.display = 'none';
+            showRevealScreen();
+        }).catch(() => {
+            // Ad Skipped or Failed (Strict Rule)
+            statusOverlay.style.display = 'none';
+            alert("❌ You must watch the full ad to unlock the video!");
+            btnPlayer1.disabled = false;
+            btnPlayer2.disabled = false;
+        });
+    } else {
+        statusOverlay.style.display = 'none';
+        alert("Monetag Ad Service unavailable. Try Player 2.");
+        btnPlayer1.disabled = false;
+        btnPlayer2.disabled = false;
+    }
+  });
+
+  // --- PLAYER 2: ADSGRAM AD (Strict) ---
+  btnPlayer2.addEventListener('click', function() {
+    if (!AdController) {
+        alert("Adsgram is not initialized. (Check block ID)");
+        return;
+    }
+
+    btnPlayer1.disabled = true;
+    btnPlayer2.disabled = true;
+    statusOverlay.style.display = 'block';
+    statusOverlay.innerHTML = 'Loading Adsgram Ad...';
+
+    AdController.show().then(() => {
+        // Ad Watched Successfully
+        statusOverlay.style.display = 'none';
+        showRevealScreen();
+    }).catch((err) => {
+        // Ad Skipped or Failed (Strict Rule)
+        console.warn("Adsgram Error:", err);
+        statusOverlay.style.display = 'none';
         
-        bot.copy_message(STORAGE_CHANNEL, chat_id, photo_msg.message_id)
-        
-        # 🟢 JSON में असली File IDs सेव करें (ना कि कॉपी वाले ऑब्जेक्ट से)
-        video_db = load_db()
-        video_db[unique_id] = {
-            "video": original_video_id,
-            "thumb": original_photo_id
+        if(err && err.toString().includes("not active")) {
+             alert("❌ Adsgram Block is not active yet. Please use Player 1.");
+        } else {
+             alert("❌ You must watch the full ad to unlock the video!");
         }
-        save_db(video_db)
-        print("✅ Saved to Storage & JSON Cache")
         
-    except Exception as e:
-        bot.send_message(chat_id, f"❌ Storage Channel Error: {e}")
-        return
+        btnPlayer1.disabled = false;
+        btnPlayer2.disabled = false;
+    });
+  });
 
-    bot_username = bot.get_me().username
-    mini_app_url = f"https://t.me/{bot_username}/{APP_SHORT_NAME}?startapp={unique_id}"
-
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("👉 Play Online Free 🍑💦", url=mini_app_url))
-    caption_text = "🎬 Watch this video for FREE!\n\n▶️ Tap the button below to play instantly"
-
-    try:
-        # 🟢 डेस्टिनेशन चैनल में भी असली फोटो ID भेजें
-        bot.send_photo(DEST_CHANNEL, original_photo_id, caption=caption_text, reply_markup=markup)
-        bot.send_message(chat_id, f"✅ Uploaded successfully!\nYour Video ID is: `{unique_id}`", parse_mode="Markdown")
-    except Exception as e:
-        bot.send_message(chat_id, f"❌ Dest Channel Error: {e}")
-
-# ---------- Flask Routes ----------
-@app.route("/health")
-def health(): return "OK", 200
-
-@app.route(f"/{BOT_TOKEN}", methods=["POST"])
-def webhook():
-    if request.headers.get("content-type") == "application/json":
-        update = Update.de_json(request.data.decode("utf-8"))
-        bot.process_new_updates([update])
-        return "", 200
-    return "", 403
-
-@app.route("/miniapp")
-def miniapp_page():
-    with open(os.path.join("static", "miniapp.html"), "r", encoding="utf-8") as f:
-        html_content = f.read()
+  // --- FUNCTION: Reveal Screen ---
+  function showRevealScreen() {
+    initialScreen.style.display = 'none';
+    revealScreen.style.display = 'flex';
     
-    html_content = html_content.replace("__BOT_USERNAME__", BOT_USERNAME)
-    html_content = html_content.replace("__MONETAG_ZONE__", MONETAG_ZONE)
-    html_content = html_content.replace("__CHANNEL_LINK__", CHANNEL_LINK)
-    html_content = html_content.replace("__CHANNEL_NAME__", CHANNEL_NAME)
-    html_content = html_content.replace("__ADSGRAM_BLOCK_ID__", ADSGRAM_BLOCK_ID)
-    
-    return Response(html_content, mimetype="text/html")
+    // Backend se real thumbnail load karein (Base64 string ki zaroorat nahi, seedha vidId)
+    thumbImg.src = '/thumb/' + encodeURIComponent(vidId);
+  }
 
-@app.route("/thumb/<vid_id>")
-def get_thumbnail(vid_id):
-    try:
-        video_db = load_db()
-        entry = video_db.get(vid_id)
-        if not entry or "thumb" not in entry: abort(404)
-        
-        file_info = bot.get_file(entry["thumb"])
-        tg_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}"
-        req = requests.get(tg_url, stream=True)
-        return Response(req.iter_content(chunk_size=1024), content_type='image/jpeg')
-    except Exception:
-        abort(500)
-
-@app.route("/admin/set-webhook")
-def admin_set_webhook():
-    if request.args.get("key") != ADMIN_KEY: abort(403)
-    bot.remove_webhook()
-    time.sleep(1)
-    ok = bot.set_webhook(url=f"{PUBLIC_URL}/{BOT_TOKEN}")
-    return jsonify({"ok": ok})
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")))
+  // --- FUNCTION: Redirect to Bot ---
+  redirectBtn.addEventListener('click', function() {
+    const botUsername = "__BOT_USERNAME__"; 
+    const botLink = `https://t.me/${botUsername}?start=${vidId}`;
+    if (tg) { tg.openTelegramLink(botLink); } else { window.open(botLink, '_blank'); }
+  });
+})();
+</script>
+</body>
+</html>

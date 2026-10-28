@@ -3,15 +3,19 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-<title>Nebula Video Player</title>
+<title>Video Player</title>
 
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
-<!-- MONETAG SDK (Zone dynamically inject hoga) -->
+<!-- 1. MONETAG SDK -->
 <script src='//libtl.com/sdk.js' data-zone='__MONETAG_ZONE__' data-sdk='show___MONETAG_ZONE__'></script>
 
-<!-- TADS SDK (यहाँ अपना TADS स्क्रिप्ट पेस्ट करें) -->
-<!-- <script src="https://YOUR_TADS_SCRIPT.js"></script> -->
+<!-- 2. TADS SDK (Render se load hoga) -->
+<script>
+  if ('__TADS_SDK_URL__' && '__TADS_SDK_URL__' !== '') {
+    document.write('<script src="' + '__TADS_SDK_URL__' + '"><\/script>');
+  }
+</script>
 
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -43,7 +47,6 @@
 <body>
 <div id="status-overlay">Loading Ad...</div>
 
-<!-- Top Banner (Dynamically injected) -->
 <a href="__CHANNEL_LINK__" target="_blank" class="top-banner">
   <div class="banner-text">💎 __CHANNEL_NAME__<br><span>Join us for premium updates!</span></div>
   <div class="banner-btn">Join Now →</div>
@@ -84,8 +87,8 @@
   if (!vidId) { displayId.textContent = "ERROR"; playBtn.disabled = true; return; }
   displayId.textContent = vidId;
 
-  // TADS INITIALIZATION (Agar aap multi-bot me TADS use karna chahte hain, toh ise bhi env var se le sakte hain)
-  const tadsAd = null; 
+  // TADS Widget ID (Injected)
+  const tadsWidgetId = "__TADS_WIDGET_ID__";
 
   playBtn.addEventListener('click', function() {
     playBtn.disabled = true;
@@ -96,11 +99,10 @@
 
     const monetagTimeout = setTimeout(() => {
         if (!adFinished) { tryTads(); }
-    }, 4000);
+    }, 4000); // 4 seconds for Monetag
 
-    // Monetag Function Call (Dynamic Zone ID)
+    // 🟢 NETWORK 1: MONETAG
     const monetagFunc = window['show___MONETAG_ZONE__'];
-    
     if (typeof monetagFunc === 'function') {
         monetagFunc().then(() => {
             adFinished = true;
@@ -118,17 +120,29 @@
     }
   });
 
+  // 🔵 NETWORK 2: TADS Fallback
   function tryTads() {
-      if (tadsAd) {
+      if (tadsWidgetId && tadsWidgetId !== "" && tadsWidgetId !== "__TADS_WIDGET_ID__") {
           statusOverlay.innerHTML = 'Loading Ad...<br><span style="font-size:11px;color:#aaa;">Network 2</span>';
-          tadsAd.show().then(() => {
+          
+          // TADS API Call
+          if (window.tads && typeof window.tads.show === 'function') {
+              // TADS fullscreen show function
+              window.tads.show({ id: tadsWidgetId }).then(() => {
+                  statusOverlay.style.display = 'none';
+                  showRevealScreen();
+              }).catch(() => {
+                  statusOverlay.style.display = 'none';
+                  showRevealScreen(); // Fallback to video
+              });
+          } else {
+              // Agar TADS SDK load nahi hua
+              console.warn("TADS SDK not loaded.");
               statusOverlay.style.display = 'none';
               showRevealScreen();
-          }).catch(() => {
-              statusOverlay.style.display = 'none';
-              showRevealScreen();
-          });
+          }
       } else {
+          // Agar ID nahi daali hai
           statusOverlay.style.display = 'none';
           showRevealScreen();
       }
@@ -141,7 +155,6 @@
   }
 
   redirectBtn.addEventListener('click', function() {
-    // Bot Username (Dynamic Injection)
     const botUsername = "__BOT_USERNAME__"; 
     const botLink = `https://t.me/${botUsername}?start=${vidId}`;
     if (tg) { tg.openTelegramLink(botLink); } else { window.open(botLink, '_blank'); }

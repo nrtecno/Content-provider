@@ -30,7 +30,7 @@ app = Flask(__name__, static_folder="static")
 media_buffer = {}
 buffer_lock = threading.Lock()
 
-# ---------- Local JSON Cache for Thumbnails ----------
+# ---------- Local JSON Cache ----------
 DB_FILE = "data.json"
 def load_db():
     if os.path.exists(DB_FILE):
@@ -47,7 +47,7 @@ def delete_message_after_delay(chat_id, message_id, delay_seconds):
     time.sleep(delay_seconds)
     try:
         bot.delete_message(chat_id, message_id)
-        print(f"🗑️ Auto-deleted video (Message ID: {message_id}) from chat {chat_id}")
+        print(f"🗑️ Auto-deleted video from chat {chat_id}")
     except Exception as e:
         print(f"⚠️ Failed to delete message: {e}")
 
@@ -57,7 +57,7 @@ def handle_start(message):
     args = message.text.split()
     if len(args) > 1:
         try:
-            unique_id = args[1] # Yahi hamari string ID hai (Message ID)
+            unique_id = args[1] 
             chat_id = message.chat.id
             
             warning_text = (
@@ -66,21 +66,21 @@ def handle_start(message):
             )
             bot.send_message(chat_id, warning_text, parse_mode="HTML")
             
-            # JSON cache check karein
             video_db = load_db()
             entry = video_db.get(unique_id)
             
+            # 1. Agar JSON me data hai, toh direct file_id se bhejein
             if entry and "video" in entry:
                 sent_video = bot.send_video(chat_id, entry["video"])
             else:
-                # Agar cache delete ho gaya hai, toh Storage Channel se direct copy karein
+                # 2. Agar JSON delete ho gaya, toh Storage Channel se copy karein
                 sent_video = bot.copy_message(
                     chat_id=chat_id, 
                     from_chat_id=STORAGE_CHANNEL, 
                     message_id=int(unique_id)
                 )
             
-            # 10 Minute (600 seconds) ka timer
+            # Timer Start (10 minutes)
             timer = threading.Thread(
                 target=delete_message_after_delay, 
                 args=(chat_id, sent_video.message_id, 600)
@@ -116,26 +116,38 @@ def process_upload(mgid, chat_id):
         bot.send_message(chat_id, "❌ Error: Please send exactly 1 Photo and 1 Video together.")
         return
 
-    # Storage Channel me bhejein aur Message ID nikaalein
+    # 🟢 STEP 1: Original File IDs nikaalein
+    original_video_id = video_msg.video.file_id
+    original_photo_id = photo_msg.photo[-1].file_id
+    
+    # Default ID (Agar storage fail ho jaye)
+    unique_id = str(int(time.time())) 
+
+    # 🟢 STEP 2: Storage Channel me bhejein (Koi error aaye toh rukein nahi)
+    if STORAGE_CHANNEL != 0:
+        try:
+            # vid_copy ek MessageId object return karta hai, isme .video nahi hota
+            vid_copy = bot.copy_message(STORAGE_CHANNEL, chat_id, video_msg.message_id)
+            unique_id = str(vid_copy.message_id) # Naya ID
+            
+            bot.copy_message(STORAGE_CHANNEL, chat_id, photo_msg.message_id)
+            print("✅ Saved to Storage Channel")
+        except Exception as e:
+            print(f"⚠️ Storage Channel Warning: {e} (Ignoring and moving forward)")
+
+    # 🟢 STEP 3: JSON me Save karein
     try:
-        vid_copy = bot.copy_message(STORAGE_CHANNEL, chat_id, video_msg.message_id)
-        unique_id = str(vid_copy.message_id) # Chhoti ID (Jaise: 15)
-        
-        photo_copy = bot.copy_message(STORAGE_CHANNEL, chat_id, photo_msg.message_id)
-        
-        # Thumbnail aur Video ID ko JSON me save karein
         video_db = load_db()
         video_db[unique_id] = {
-            "video": vid_copy.video.file_id,
-            "thumb": photo_copy.photo[-1].file_id
+            "video": original_video_id,
+            "thumb": original_photo_id
         }
         save_db(video_db)
-        print("✅ Saved to Storage & JSON Cache")
-        
+        print("✅ Saved to JSON")
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Storage Channel Error: {e}")
-        return
+        print(f"⚠️ JSON Warning: {e}")
 
+    # 🟢 STEP 4: Destination Channel me post karein (Ye 100% chalega)
     bot_username = bot.get_me().username
     mini_app_url = f"https://t.me/{bot_username}/{APP_SHORT_NAME}?startapp={unique_id}"
 
@@ -144,10 +156,12 @@ def process_upload(mgid, chat_id):
     caption_text = "🎬 Watch this video for FREE!\n\n▶️ Tap the button below to play instantly"
 
     try:
-        bot.send_photo(DEST_CHANNEL, photo_copy.photo[-1].file_id, caption=caption_text, reply_markup=markup)
+        bot.send_photo(DEST_CHANNEL, original_photo_id, caption=caption_text, reply_markup=markup)
         bot.send_message(chat_id, f"✅ Uploaded successfully!\nYour Video ID is: `{unique_id}`", parse_mode="Markdown")
+        print("✅ Posted to Destination Channel")
     except Exception as e:
         bot.send_message(chat_id, f"❌ Dest Channel Error: {e}")
+        print(f"❌ Dest Error: {e}")
 
 # ---------- Flask Routes ----------
 @app.route("/health")
@@ -182,9 +196,10 @@ def get_thumbnail(vid_id):
         if not entry or "thumb" not in entry: abort(404)
         
         file_info = bot.get_file(entry["thumb"])
-        tg_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}"
-        req = requests.get(tg_url, stream=True)
-        return Response(req.iter_content(chunk_size=1024), content_type='image/jpeg')
+        tg_url = f"https://api.telegram.org/bot{BOT_TOKEN}/getFile?file_id={entry['thumb']}"
+        # Direct redirect to telegram CDN for faster loading
+        file_path = file_info.file_path
+        return Response(requests.get(f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}", stream=True).iter_content(chunk_size=1024), content_type='image/jpeg')
     except Exception:
         abort(500)
 

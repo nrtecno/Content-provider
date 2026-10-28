@@ -1,6 +1,5 @@
 import os
 import time
-import uuid
 import threading
 import requests
 from flask import Flask, request, Response, send_from_directory, jsonify, abort
@@ -33,7 +32,6 @@ buffer_lock = threading.Lock()
 
 # ---------- Auto Delete Function ----------
 def delete_message_after_delay(chat_id, message_id, delay_seconds):
-    # Yeh function background mein chalega aur delay ke baad video delete kar dega
     time.sleep(delay_seconds)
     try:
         bot.delete_message(chat_id, message_id)
@@ -64,7 +62,7 @@ def handle_start(message):
                 message_id=storage_msg_id
             )
             
-            # 3. 10 Minute (600 seconds) ka timer start karein video delete karne ke liye
+            # 3. 10 Minute (600 seconds) ka timer start karein
             timer = threading.Thread(
                 target=delete_message_after_delay, 
                 args=(chat_id, sent_video.message_id, 600)
@@ -102,36 +100,37 @@ def process_upload(mgid, chat_id):
         bot.send_message(chat_id, "❌ Error: Please send exactly 1 Photo and 1 Video together.")
         return
 
-    # 1. Video ko Storage Channel me bhejein
-    try:
-        vid_copy = bot.copy_message(STORAGE_CHANNEL, chat_id, video_msg.message_id)
-        storage_msg_id = vid_copy.message_id # Yahi hamari string ID hai!
-        
-        bot.edit_message_caption(
-            chat_id=STORAGE_CHANNEL, 
-            message_id=storage_msg_id, 
-            caption=f"🎥 Video ID: `{storage_msg_id}`", 
-            parse_mode="Markdown"
-        )
-    except Exception as e:
-        bot.send_message(chat_id, f"❌ Storage Channel Error: {e}")
-        return
+    # 🟢 FIX: Variables ko sabse pehle initialize karein (taaki undefined error na aaye)
+    safe_video_id = video_msg.video.file_id
+    safe_photo_id = photo_msg.photo[-1].file_id
+    storage_msg_id = video_msg.message_id 
 
-    # 2. Photo ko Storage Channel me bhejein
-    try:
-        photo_copy = bot.copy_message(STORAGE_CHANNEL, chat_id, photo_msg.message_id)
-        storage_photo_id = photo_copy.message_id
-        bot.edit_message_caption(
-            chat_id=STORAGE_CHANNEL, 
-            message_id=storage_photo_id, 
-            caption=f"🖼 Thumbnail for Video ID: `{storage_msg_id}`", 
-            parse_mode="Markdown"
-        )
-        safe_photo_id = photo_copy.photo[-1].file_id
-    except Exception as e:
-        print(f"Photo storage error: {e}")
+    # 1. Cloud Storage (Storage Channel) me save karein
+    if STORAGE_CHANNEL != 0:
+        try:
+            vid_copy = bot.copy_message(STORAGE_CHANNEL, chat_id, video_msg.message_id)
+            storage_msg_id = vid_copy.message_id 
+            
+            bot.edit_message_caption(
+                chat_id=STORAGE_CHANNEL, 
+                message_id=storage_msg_id, 
+                caption=f"🎥 Video ID: `{storage_msg_id}`", 
+                parse_mode="Markdown"
+            )
+            
+            photo_copy = bot.copy_message(STORAGE_CHANNEL, chat_id, photo_msg.message_id)
+            bot.edit_message_caption(
+                chat_id=STORAGE_CHANNEL, 
+                message_id=photo_copy.message_id, 
+                caption=f"🖼 Thumbnail for Video ID: `{storage_msg_id}`", 
+                parse_mode="Markdown"
+            )
+            safe_photo_id = photo_copy.photo[-1].file_id # Update ID if copy successful
+            print("✅ Saved to Storage Channel successfully.")
+        except Exception as e:
+            print(f"⚠️ Storage Channel Error (Ignoring): {e}")
 
-    # 3. Destination Channel me post karein
+    # 2. Destination Channel me post karein
     bot_username = bot.get_me().username
     mini_app_url = f"https://t.me/{bot_username}/{APP_SHORT_NAME}?startapp={storage_msg_id}"
 
@@ -142,8 +141,10 @@ def process_upload(mgid, chat_id):
     try:
         bot.send_photo(DEST_CHANNEL, safe_photo_id, caption=caption_text, reply_markup=markup)
         bot.send_message(chat_id, f"✅ Uploaded successfully!\nYour Video ID is: `{storage_msg_id}`", parse_mode="Markdown")
+        print("✅ Posted to Destination Channel.")
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Dest Channel Error: {e}")
+        bot.send_message(chat_id, f"❌ Failed to post in Destination Channel. Check if Bot is Admin. Error: {e}")
+        print(f"❌ Dest Channel Error: {e}")
 
 # ---------- Flask Routes ----------
 @app.route("/health")

@@ -34,14 +34,27 @@
   .thumbnail-box img { width: 100%; height: 100%; object-fit: cover; }
   .play-redirect-btn { background: linear-gradient(90deg, #06b6d4, #3b82f6); color: #fff; border: none; padding: 16px; border-radius: 12px; font-weight: 700; font-size: 16px; cursor: pointer; width: 100%; max-width: 300px; box-shadow: 0 5px 20px rgba(59, 130, 246, 0.4); }
   
-  .play-btn-main { background: linear-gradient(90deg, #06b6d4, #3b82f6); color: #fff; border: none; padding: 15px 40px; border-radius: 10px; font-weight: 700; font-size: 18px; cursor: pointer; width: 100%; max-width: 300px; }
+  /* Player Buttons */
+  .btn-group { display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 300px; }
   
-  #status-overlay { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); padding: 20px 30px; border-radius: 12px; color: #fff; font-size: 15px; display: none; z-index: 1000; text-align: center; border: 1px solid #333; width: 200px;}
+  .play-btn-main { 
+      background: linear-gradient(90deg, #06b6d4, #3b82f6); color: #fff; border: none; 
+      padding: 15px 20px; border-radius: 10px; font-weight: 700; font-size: 16px; 
+      cursor: pointer; width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px;
+      box-shadow: 0 4px 15px rgba(6, 182, 212, 0.3); transition: 0.2s;
+  }
+  .play-btn-main:active { transform: scale(0.98); }
+  .play-btn-main:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-adsgram { background: linear-gradient(90deg, #8b5cf6, #d946ef); box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3); }
+  
+  #status-overlay { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.95); padding: 20px 30px; border-radius: 12px; color: #fff; font-size: 15px; display: none; z-index: 1000; text-align: center; border: 1px solid #333; width: 220px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);}
+  
   @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 </style>
 </head>
 <body>
-<div id="status-overlay">Loading Ad...</div>
+<div id="status-overlay">Loading Ad...<br><span style="font-size:11px;color:#aaa;">Please wait...</span></div>
 
 <a href="__CHANNEL_LINK__" target="_blank" class="top-banner">
   <div class="banner-text">💎 __CHANNEL_NAME__<br><span>Join us for premium updates!</span></div>
@@ -49,15 +62,25 @@
 </a>
 
 <div class="main-content">
+  <!-- Screen 1: Choose Player & Watch Ad -->
   <div id="initial-screen" style="text-align: center; width: 100%; display: flex; flex-direction: column; align-items: center;">
     <div class="ticket-box">
       <p>Video ID</p>
       <h3 id="display-id">LOADING...</h3>
     </div>
-    <p style="color: #a1a1aa; font-size: 13px; margin-bottom: 20px;">Tap Play to unlock your video</p>
-    <button id="play-trigger-btn" class="play-btn-main">▶ Play</button>
+    <p style="color: #a1a1aa; font-size: 13px; margin-bottom: 20px;">Select a player & watch the ad to unlock your video</p>
+    
+    <div class="btn-group">
+        <button id="btn-player1" class="play-btn-main">
+            ▶ Player 1 (Monetag Ad)
+        </button>
+        <button id="btn-player2" class="play-btn-main btn-adsgram">
+            ▶ Player 2 (Adsgram Ad)
+        </button>
+    </div>
   </div>
 
+  <!-- Screen 2: Unlocked Video (Thumbnail + Bot Link) -->
   <div id="video-reveal-screen">
     <div class="thumbnail-box"><img id="thumb-img" src="" alt="Thumbnail"></div>
     <button id="redirect-btn" class="play-redirect-btn">▶ Play Video on Bot</button>
@@ -73,73 +96,84 @@
   let vidId = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) ? tg.initDataUnsafe.start_param : new URLSearchParams(window.location.search).get('id');
   
   const displayId = document.getElementById('display-id');
-  const playBtn = document.getElementById('play-trigger-btn');
+  const btnPlayer1 = document.getElementById('btn-player1');
+  const btnPlayer2 = document.getElementById('btn-player2');
   const initialScreen = document.getElementById('initial-screen');
   const revealScreen = document.getElementById('video-reveal-screen');
   const thumbImg = document.getElementById('thumb-img');
   const redirectBtn = document.getElementById('redirect-btn');
   const statusOverlay = document.getElementById('status-overlay');
 
-  if (!vidId) { displayId.textContent = "ERROR"; playBtn.disabled = true; return; }
+  if (!vidId) { displayId.textContent = "ERROR"; btnPlayer1.disabled = true; btnPlayer2.disabled = true; return; }
   displayId.textContent = vidId;
 
-  // Adsgram Initialize
+  // Initialize Adsgram
   let AdController = null;
   try {
     if (window.Adsgram) {
-      // Block ID Render se inject hoga
       AdController = window.Adsgram.init({ blockId: "__ADSGRAM_BLOCK_ID__" });
     }
   } catch (e) { console.warn('Adsgram init failed', e); }
 
-  playBtn.addEventListener('click', function() {
-    playBtn.disabled = true;
+  // --- PLAYER 1: MONETAG AD (Strict) ---
+  btnPlayer1.addEventListener('click', function() {
+    btnPlayer1.disabled = true;
+    btnPlayer2.disabled = true;
     statusOverlay.style.display = 'block';
-    statusOverlay.innerHTML = 'Loading Ad...<br><span style="font-size:11px;color:#aaa;">Network 1</span>';
+    statusOverlay.innerHTML = 'Loading Monetag Ad...';
 
-    let adFinished = false; 
-
-    // 4 सेकंड का टाइमर (Monetag के लिए)
-    const monetagTimeout = setTimeout(() => {
-        if (!adFinished) { tryAdsgram(); }
-    }, 4000);
-
-    // 🟢 NETWORK 1: MONETAG
-    const monetagFunc = window['show___MONETAG_ZONE__'];
-    if (typeof monetagFunc === 'function') {
-        monetagFunc().then(() => {
-            adFinished = true;
-            clearTimeout(monetagTimeout);
+    if (typeof window['show___MONETAG_ZONE__'] === 'function') {
+        window['show___MONETAG_ZONE__']().then(() => {
+            // Ad Watched Successfully
             statusOverlay.style.display = 'none';
             showRevealScreen();
         }).catch(() => {
-            adFinished = true;
-            clearTimeout(monetagTimeout);
-            tryAdsgram(); 
+            // Ad Skipped or Failed (Strict Rule)
+            statusOverlay.style.display = 'none';
+            alert("❌ You must watch the full ad to unlock the video!");
+            btnPlayer1.disabled = false;
+            btnPlayer2.disabled = false;
         });
     } else {
-        clearTimeout(monetagTimeout);
-        tryAdsgram();
+        statusOverlay.style.display = 'none';
+        alert("Monetag Ad Service unavailable. Try Player 2.");
+        btnPlayer1.disabled = false;
+        btnPlayer2.disabled = false;
     }
   });
 
-  // 🔵 NETWORK 2: ADSGRAM (Fallback)
-  function tryAdsgram() {
-      if (AdController) {
-          statusOverlay.innerHTML = 'Loading Ad...<br><span style="font-size:11px;color:#aaa;">Network 2</span>';
-          AdController.show().then(() => {
-              statusOverlay.style.display = 'none';
-              showRevealScreen();
-          }).catch(() => {
-              statusOverlay.style.display = 'none';
-              showRevealScreen(); // अगर Adsgram भी फेल हो जाए
-          });
-      } else {
-          // अगर Adsgram कॉन्फ़िगर नहीं है
-          statusOverlay.style.display = 'none';
-          showRevealScreen();
-      }
-  }
+  // --- PLAYER 2: ADSGRAM AD (Strict) ---
+  btnPlayer2.addEventListener('click', function() {
+    if (!AdController) {
+        alert("Adsgram is not initialized. (Check block ID)");
+        return;
+    }
+
+    btnPlayer1.disabled = true;
+    btnPlayer2.disabled = true;
+    statusOverlay.style.display = 'block';
+    statusOverlay.innerHTML = 'Loading Adsgram Ad...';
+
+    AdController.show().then(() => {
+        // Ad Watched Successfully
+        statusOverlay.style.display = 'none';
+        showRevealScreen();
+    }).catch((err) => {
+        // Ad Skipped or Failed (Strict Rule)
+        console.warn("Adsgram Error:", err);
+        statusOverlay.style.display = 'none';
+        
+        // Adsgram error text check
+        if(err && err.toString().includes("not active")) {
+             alert("❌ Adsgram Block is not active yet. Please use Player 1.");
+        } else {
+             alert("❌ You must watch the full ad to unlock the video!");
+        }
+        
+        btnPlayer1.disabled = false;
+        btnPlayer2.disabled = false;
+    });
+  });
 
   function showRevealScreen() {
     initialScreen.style.display = 'none';

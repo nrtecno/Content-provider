@@ -2,7 +2,7 @@ import os
 import time
 import threading
 import requests
-import base64
+import json
 from flask import Flask, request, Response, send_from_directory, jsonify, abort
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Update
@@ -15,7 +15,6 @@ PUBLIC_URL = os.getenv("PUBLIC_URL", "").rstrip("/")
 ADMIN_KEY = os.getenv("ADMIN_KEY", "test123")
 APP_SHORT_NAME = os.getenv("APP_SHORT_NAME", "Wach")
 
-# Frontend Variables
 BOT_USERNAME = os.getenv("BOT_USERNAME", "")
 MONETAG_ZONE = os.getenv("MONETAG_ZONE", "")
 CHANNEL_LINK = os.getenv("CHANNEL_LINK", "https://t.me/nr_hackz")
@@ -30,6 +29,18 @@ app = Flask(__name__, static_folder="static")
 
 media_buffer = {}
 buffer_lock = threading.Lock()
+
+# ---------- Local JSON Cache for Thumbnails ----------
+DB_FILE = "data.json"
+def load_db():
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r") as f: return json.load(f)
+        except: return {}
+    return {}
+
+def save_db(data):
+    with open(DB_FILE, "w") as f: json.dump(data, f)
 
 # ---------- Auto Delete Function ----------
 def delete_message_after_delay(chat_id, message_id, delay_seconds):
@@ -46,11 +57,7 @@ def handle_start(message):
     args = message.text.split()
     if len(args) > 1:
         try:
-            encoded_id = args[1]
-            encoded_id += "=" * (-len(encoded_id) % 4)
-            raw_payload = base64.urlsafe_b64decode(encoded_id.encode()).decode()
-            safe_video_id, safe_photo_id = raw_payload.split("||")
-            
+            unique_id = args[1] # Yahi hamari string ID hai (Message ID)
             chat_id = message.chat.id
             
             warning_text = (
@@ -59,8 +66,21 @@ def handle_start(message):
             )
             bot.send_message(chat_id, warning_text, parse_mode="HTML")
             
-            sent_video = bot.send_video(chat_id, safe_video_id)
+            # JSON cache check karein
+            video_db = load_db()
+            entry = video_db.get(unique_id)
             
+            if entry and "video" in entry:
+                sent_video = bot.send_video(chat_id, entry["video"])
+            else:
+                # Agar cache delete ho gaya hai, toh Storage Channel se direct copy karein
+                sent_video = bot.copy_message(
+                    chat_id=chat_id, 
+                    from_chat_id=STORAGE_CHANNEL, 
+                    message_id=int(unique_id)
+                )
+            
+            # 10 Minute (600 seconds) ka timer
             timer = threading.Thread(
                 target=delete_message_after_delay, 
                 args=(chat_id, sent_video.message_id, 600)
@@ -69,7 +89,7 @@ def handle_start(message):
             timer.start()
             
         except Exception as e:
-            bot.send_message(message.chat.id, "❌ Video not found or link is corrupted.")
+            bot.send_message(message.chat.id, "❌ Video not found or deleted.")
             print(f"Error fetching: {e}")
     else:
         bot.send_message(message.chat.id, "👋 Welcome! Send me a Photo and Video **together** to generate a new link.")
@@ -96,33 +116,38 @@ def process_upload(mgid, chat_id):
         bot.send_message(chat_id, "❌ Error: Please send exactly 1 Photo and 1 Video together.")
         return
 
-    safe_video_id = video_msg.video.file_id
-    safe_photo_id = photo_msg.photo[-1].file_id
-
-    if STORAGE_CHANNEL != 0:
-        try:
-            bot.copy_message(STORAGE_CHANNEL, chat_id, video_msg.message_id)
-            bot.copy_message(STORAGE_CHANNEL, chat_id, photo_msg.message_id)
-        except Exception as e:
-            print(f"⚠️ Storage Channel Error (Ignored): {e}")
-
-    raw_payload = f"{safe_video_id}||{safe_photo_id}"
-    encoded_id = base64.urlsafe_b64encode(raw_payload.encode()).decode().rstrip("=")
+    # Storage Channel me bhejein aur Message ID nikaalein
+    try:
+        vid_copy = bot.copy_message(STORAGE_CHANNEL, chat_id, video_msg.message_id)
+        unique_id = str(vid_copy.message_id) # Chhoti ID (Jaise: 15)
+        
+        photo_copy = bot.copy_message(STORAGE_CHANNEL, chat_id, photo_msg.message_id)
+        
+        # Thumbnail aur Video ID ko JSON me save karein
+        video_db = load_db()
+        video_db[unique_id] = {
+            "video": vid_copy.video.file_id,
+            "thumb": photo_copy.photo[-1].file_id
+        }
+        save_db(video_db)
+        print("✅ Saved to Storage & JSON Cache")
+        
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ Storage Channel Error: {e}")
+        return
 
     bot_username = bot.get_me().username
-    mini_app_url = f"https://t.me/{bot_username}/{APP_SHORT_NAME}?startapp={encoded_id}"
+    mini_app_url = f"https://t.me/{bot_username}/{APP_SHORT_NAME}?startapp={unique_id}"
 
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("👉 Play Online Free 🍑💦", url=mini_app_url))
     caption_text = "🎬 Watch this video for FREE!\n\n▶️ Tap the button below to play instantly"
 
     try:
-        bot.send_photo(DEST_CHANNEL, safe_photo_id, caption=caption_text, reply_markup=markup)
-        short_id = encoded_id[:10].upper()
-        bot.send_message(chat_id, f"✅ Uploaded successfully!\nYour Video ID is: `{short_id}`", parse_mode="Markdown")
-        print("✅ Posted to Destination Channel.")
+        bot.send_photo(DEST_CHANNEL, photo_copy.photo[-1].file_id, caption=caption_text, reply_markup=markup)
+        bot.send_message(chat_id, f"✅ Uploaded successfully!\nYour Video ID is: `{unique_id}`", parse_mode="Markdown")
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Failed to post in Dest Channel. Error: {e}")
+        bot.send_message(chat_id, f"❌ Dest Channel Error: {e}")
 
 # ---------- Flask Routes ----------
 @app.route("/health")
@@ -149,19 +174,18 @@ def miniapp_page():
     
     return Response(html_content, mimetype="text/html")
 
-@app.route("/thumb/<encoded_id>")
-def get_thumbnail(encoded_id):
+@app.route("/thumb/<vid_id>")
+def get_thumbnail(vid_id):
     try:
-        encoded_id += "=" * (-len(encoded_id) % 4)
-        raw_payload = base64.urlsafe_b64decode(encoded_id.encode()).decode()
-        safe_video_id, safe_photo_id = raw_payload.split("||")
+        video_db = load_db()
+        entry = video_db.get(vid_id)
+        if not entry or "thumb" not in entry: abort(404)
         
-        file_info = bot.get_file(safe_photo_id)
+        file_info = bot.get_file(entry["thumb"])
         tg_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}"
         req = requests.get(tg_url, stream=True)
         return Response(req.iter_content(chunk_size=1024), content_type='image/jpeg')
-    except Exception as e:
-        print(f"Thumb error: {e}")
+    except Exception:
         abort(500)
 
 @app.route("/admin/set-webhook")

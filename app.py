@@ -16,13 +16,12 @@ PUBLIC_URL = os.getenv("PUBLIC_URL", "").rstrip("/")
 ADMIN_KEY = os.getenv("ADMIN_KEY", "test123")
 APP_SHORT_NAME = os.getenv("APP_SHORT_NAME", "Watch")
 
-# Frontend Variables (Render se aayenge)
+# Frontend Variables
 BOT_USERNAME = os.getenv("BOT_USERNAME", "")
 MONETAG_ZONE = os.getenv("MONETAG_ZONE", "")
 CHANNEL_LINK = os.getenv("CHANNEL_LINK", "https://t.me/telegram")
 CHANNEL_NAME = os.getenv("CHANNEL_NAME", "Join Our Channel")
-TADS_WIDGET_ID = os.getenv("TADS_WIDGET_ID", "")
-TADS_SDK_URL = os.getenv("TADS_SDK_URL", "")
+ADSGRAM_BLOCK_ID = os.getenv("ADSGRAM_BLOCK_ID", "") # Naya Fallback Variable
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN env variable missing")
@@ -136,8 +135,7 @@ def miniapp_page():
     html_content = html_content.replace("__MONETAG_ZONE__", MONETAG_ZONE)
     html_content = html_content.replace("__CHANNEL_LINK__", CHANNEL_LINK)
     html_content = html_content.replace("__CHANNEL_NAME__", CHANNEL_NAME)
-    html_content = html_content.replace("__TADS_WIDGET_ID__", TADS_WIDGET_ID)
-    html_content = html_content.replace("__TADS_SDK_URL__", TADS_SDK_URL)
+    html_content = html_content.replace("__ADSGRAM_BLOCK_ID__", ADSGRAM_BLOCK_ID)
     
     return Response(html_content, mimetype="text/html")
 

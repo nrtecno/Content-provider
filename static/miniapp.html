@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
 <title>Video Player</title>
 
+<!-- Telegram Web App SDK -->
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
 <!-- 1. MONETAG SDK -->
@@ -30,8 +31,17 @@
   .ticket-box h3 { margin: 0; font-family: monospace; font-size: 24px; color: #2ea6ff; letter-spacing: 2px;}
 
   #video-reveal-screen { display: none; flex-direction: column; align-items: center; width: 100%; animation: fadeIn 0.5s; }
-  .thumbnail-box { width: 100%; max-width: 300px; aspect-ratio: 16/9; background: #18181b; border-radius: 16px; overflow: hidden; border: 2px solid #27272a; margin-bottom: 20px; }
-  .thumbnail-box img { width: 100%; height: 100%; object-fit: cover; }
+  
+  /* Dummy Thumbnail Box (Kyunki DB nahi hai) */
+  .thumbnail-box { 
+      width: 100%; max-width: 300px; aspect-ratio: 16/9; 
+      background: linear-gradient(135deg, #18181b, #27272a); 
+      border-radius: 16px; overflow: hidden; border: 2px solid #3f3f46; 
+      margin-bottom: 20px; display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  }
+  .thumbnail-box .play-icon { font-size: 50px; opacity: 0.5; }
+  
   .play-redirect-btn { background: linear-gradient(90deg, #06b6d4, #3b82f6); color: #fff; border: none; padding: 16px; border-radius: 12px; font-weight: 700; font-size: 16px; cursor: pointer; width: 100%; max-width: 300px; box-shadow: 0 5px 20px rgba(59, 130, 246, 0.4); }
   
   /* Player Buttons */
@@ -80,9 +90,9 @@
     </div>
   </div>
 
-  <!-- Screen 2: Unlocked Video (Thumbnail + Bot Link) -->
+  <!-- Screen 2: Unlocked Video (Dummy Thumbnail + Bot Link) -->
   <div id="video-reveal-screen">
-    <div class="thumbnail-box"><img id="thumb-img" src="" alt="Thumbnail"></div>
+    <div class="thumbnail-box"><div class="play-icon">🎬</div></div>
     <button id="redirect-btn" class="play-redirect-btn">▶ Play Video on Bot</button>
     <p style="color: #71717a; font-size: 12px; margin-top: 15px; text-align: center;">You will be redirected to our Bot to receive the video securely.</p>
   </div>
@@ -93,6 +103,7 @@
   const tg = window.Telegram && window.Telegram.WebApp;
   if (tg) { try { tg.ready(); tg.expand(); } catch(e){} }
 
+  // URL ya Telegram startapp se ID nikaalein
   let vidId = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) ? tg.initDataUnsafe.start_param : new URLSearchParams(window.location.search).get('id');
   
   const displayId = document.getElementById('display-id');
@@ -100,7 +111,6 @@
   const btnPlayer2 = document.getElementById('btn-player2');
   const initialScreen = document.getElementById('initial-screen');
   const revealScreen = document.getElementById('video-reveal-screen');
-  const thumbImg = document.getElementById('thumb-img');
   const redirectBtn = document.getElementById('redirect-btn');
   const statusOverlay = document.getElementById('status-overlay');
 
@@ -115,7 +125,7 @@
     }
   } catch (e) { console.warn('Adsgram init failed', e); }
 
-  // --- PLAYER 1: MONETAG AD (Strict) ---
+  // --- PLAYER 1: MONETAG AD (Strict Rule) ---
   btnPlayer1.addEventListener('click', function() {
     btnPlayer1.disabled = true;
     btnPlayer2.disabled = true;
@@ -142,7 +152,7 @@
     }
   });
 
-  // --- PLAYER 2: ADSGRAM AD (Strict) ---
+  // --- PLAYER 2: ADSGRAM AD (Strict Rule) ---
   btnPlayer2.addEventListener('click', function() {
     if (!AdController) {
         alert("Adsgram is not initialized. (Check block ID)");
@@ -177,9 +187,9 @@
   function showRevealScreen() {
     initialScreen.style.display = 'none';
     revealScreen.style.display = 'flex';
-    thumbImg.src = '/thumb/' + encodeURIComponent(vidId);
   }
 
+  // Redirect to Bot
   redirectBtn.addEventListener('click', function() {
     const botUsername = "__BOT_USERNAME__"; 
     const botLink = `https://t.me/${botUsername}?start=${vidId}`;

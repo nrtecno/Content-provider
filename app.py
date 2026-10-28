@@ -6,7 +6,6 @@ import requests
 from flask import Flask, request, Response, send_from_directory, jsonify, abort
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Update
-import libsql_client
 
 # ---------- Config ----------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -23,52 +22,61 @@ CHANNEL_LINK = os.getenv("CHANNEL_LINK", "https://t.me/nr_hackz")
 CHANNEL_NAME = os.getenv("CHANNEL_NAME", "Super Tech Channel")
 ADSGRAM_BLOCK_ID = os.getenv("ADSGRAM_BLOCK_ID", "")
 
-# ---------- Turso Database Connection ----------
-TURSO_URL = os.getenv("TURSO_DATABASE_URL")
-TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
-
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN env variable missing")
-if not TURSO_URL or not TURSO_AUTH_TOKEN:
-    raise RuntimeError("Turso DB credentials missing")
 
-if TURSO_URL.startswith("libsql://"):
-    TURSO_URL = TURSO_URL.replace("libsql://", "https://", 1)
-
-db_client = libsql_client.create_client_sync(
-    url=TURSO_URL,
-    auth_token=TURSO_AUTH_TOKEN
-)
-
-# Table initialize
-try:
-    db_client.execute("CREATE TABLE IF NOT EXISTS videos (id TEXT PRIMARY KEY, video_id TEXT, thumb_id TEXT)")
-except Exception as e:
-    print(f"DB Init Error: {e}")
-
-# ---------- Bot Setup ----------
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 app = Flask(__name__, static_folder="static")
 
 media_buffer = {}
 buffer_lock = threading.Lock()
 
+# ---------- Auto Delete Function ----------
+def delete_message_after_delay(chat_id, message_id, delay_seconds):
+    # Yeh function background mein chalega aur delay ke baad video delete kar dega
+    time.sleep(delay_seconds)
+    try:
+        bot.delete_message(chat_id, message_id)
+        print(f"🗑️ Auto-deleted video (Message ID: {message_id}) from chat {chat_id}")
+    except Exception as e:
+        print(f"⚠️ Failed to delete message: {e}")
+
 # ---------- Bot Handlers ----------
 @bot.message_handler(commands=['start'])
 def handle_start(message):
     args = message.text.split()
     if len(args) > 1:
-        vid_id = args[1]
         try:
-            result = db_client.execute("SELECT video_id FROM videos WHERE id = ?", [vid_id])
-            if result.rows:
-                bot.send_message(message.chat.id, "✅ Here is your requested video. Enjoy!")
-                bot.send_video(message.chat.id, result.rows[0][0])
-            else:
-                bot.send_message(message.chat.id, "❌ Video not found.")
+            storage_msg_id = int(args[1])
+            chat_id = message.chat.id
+            
+            # 1. Quote wala warning message bhejein
+            warning_text = (
+                "<blockquote>📥 <b>forward anyone & save....</b>\n\n"
+                "The video will be removed from here in 10 minutes.</blockquote>"
+            )
+            bot.send_message(chat_id, warning_text, parse_mode="HTML")
+            
+            # 2. Video bhejein
+            sent_video = bot.copy_message(
+                chat_id=chat_id, 
+                from_chat_id=STORAGE_CHANNEL, 
+                message_id=storage_msg_id
+            )
+            
+            # 3. 10 Minute (600 seconds) ka timer start karein video delete karne ke liye
+            timer = threading.Thread(
+                target=delete_message_after_delay, 
+                args=(chat_id, sent_video.message_id, 600)
+            )
+            timer.daemon = True
+            timer.start()
+            
+        except ValueError:
+            bot.send_message(message.chat.id, "❌ Invalid Video ID format.")
         except Exception as e:
-            bot.send_message(message.chat.id, "❌ Database error. Please try again.")
-            print(f"DB Fetch Error: {e}")
+            bot.send_message(message.chat.id, "❌ Video not found or deleted from storage.")
+            print(f"Error fetching from storage: {e}")
     else:
         bot.send_message(message.chat.id, "👋 Welcome! Send me a Photo and Video **together** to generate a new link.")
 
@@ -94,38 +102,38 @@ def process_upload(mgid, chat_id):
         bot.send_message(chat_id, "❌ Error: Please send exactly 1 Photo and 1 Video together.")
         return
 
-    unique_id = uuid.uuid4().hex[:10].upper()
-    safe_video_id = video_msg.video.file_id
-    safe_photo_id = photo_msg.photo[-1].file_id
-
-    # 1. Cloud Storage (Storage Channel) me save karein
-    if STORAGE_CHANNEL != 0:
-        try:
-            vid_copy = bot.copy_message(STORAGE_CHANNEL, chat_id, video_msg.message_id)
-            bot.edit_message_caption(chat_id=STORAGE_CHANNEL, message_id=vid_copy.message_id, caption=f"🎥 Video ID: `{unique_id}`", parse_mode="Markdown")
-            safe_video_id = vid_copy.video.file_id
-            
-            photo_copy = bot.copy_message(STORAGE_CHANNEL, chat_id, photo_msg.message_id)
-            bot.edit_message_caption(chat_id=STORAGE_CHANNEL, message_id=photo_copy.message_id, caption=f"🖼 Thumbnail ID: `{unique_id}`", parse_mode="Markdown")
-            safe_photo_id = photo_copy.photo[-1].file_id
-            print("✅ Saved to Storage Channel")
-        except Exception as e:
-            print(f"⚠️ Cloud storage failed: {e}")
-
-    # 2. Turso DB me save karein (Agar fail ho toh rukna nahi hai)
+    # 1. Video ko Storage Channel me bhejein
     try:
-        db_client.execute(
-            "INSERT OR REPLACE INTO videos (id, video_id, thumb_id) VALUES (?, ?, ?)",
-            [unique_id, safe_video_id, safe_photo_id]
+        vid_copy = bot.copy_message(STORAGE_CHANNEL, chat_id, video_msg.message_id)
+        storage_msg_id = vid_copy.message_id # Yahi hamari string ID hai!
+        
+        bot.edit_message_caption(
+            chat_id=STORAGE_CHANNEL, 
+            message_id=storage_msg_id, 
+            caption=f"🎥 Video ID: `{storage_msg_id}`", 
+            parse_mode="Markdown"
         )
-        print("✅ Saved to Database")
     except Exception as e:
-        print(f"❌ Database Error (Ignoring to send to channel): {e}")
-        bot.send_message(chat_id, f"⚠️ Warning: Video saved in Storage, but DB failed.")
+        bot.send_message(chat_id, f"❌ Storage Channel Error: {e}")
+        return
+
+    # 2. Photo ko Storage Channel me bhejein
+    try:
+        photo_copy = bot.copy_message(STORAGE_CHANNEL, chat_id, photo_msg.message_id)
+        storage_photo_id = photo_copy.message_id
+        bot.edit_message_caption(
+            chat_id=STORAGE_CHANNEL, 
+            message_id=storage_photo_id, 
+            caption=f"🖼 Thumbnail for Video ID: `{storage_msg_id}`", 
+            parse_mode="Markdown"
+        )
+        safe_photo_id = photo_copy.photo[-1].file_id
+    except Exception as e:
+        print(f"Photo storage error: {e}")
 
     # 3. Destination Channel me post karein
     bot_username = bot.get_me().username
-    mini_app_url = f"https://t.me/{bot_username}/{APP_SHORT_NAME}?startapp={unique_id}"
+    mini_app_url = f"https://t.me/{bot_username}/{APP_SHORT_NAME}?startapp={storage_msg_id}"
 
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("👉 Play Online Free 🍑💦", url=mini_app_url))
@@ -133,11 +141,9 @@ def process_upload(mgid, chat_id):
 
     try:
         bot.send_photo(DEST_CHANNEL, safe_photo_id, caption=caption_text, reply_markup=markup)
-        bot.send_message(chat_id, f"✅ Uploaded successfully!\nYour Video ID is: `{unique_id}`", parse_mode="Markdown")
-        print("✅ Posted to Destination Channel")
+        bot.send_message(chat_id, f"✅ Uploaded successfully!\nYour Video ID is: `{storage_msg_id}`", parse_mode="Markdown")
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Failed to send to DEST Channel. Check if bot is Admin & Channel ID is correct. Error: {e}")
-        print(f"❌ Dest Channel Error: {e}")
+        bot.send_message(chat_id, f"❌ Dest Channel Error: {e}")
 
 # ---------- Flask Routes ----------
 @app.route("/health")
@@ -163,19 +169,6 @@ def miniapp_page():
     html_content = html_content.replace("__ADSGRAM_BLOCK_ID__", ADSGRAM_BLOCK_ID)
     
     return Response(html_content, mimetype="text/html")
-
-@app.route("/thumb/<vid_id>")
-def get_thumbnail(vid_id):
-    try:
-        result = db_client.execute("SELECT thumb_id FROM videos WHERE id = ?", [vid_id])
-        if not result.rows: abort(404)
-        
-        file_info = bot.get_file(result.rows[0][0])
-        tg_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}"
-        req = requests.get(tg_url, stream=True)
-        return Response(req.iter_content(chunk_size=1024), content_type='image/jpeg')
-    except Exception:
-        abort(500)
 
 @app.route("/admin/set-webhook")
 def admin_set_webhook():

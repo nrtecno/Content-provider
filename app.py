@@ -32,17 +32,15 @@ if not BOT_TOKEN:
 if not TURSO_URL or not TURSO_AUTH_TOKEN:
     raise RuntimeError("Turso DB credentials missing")
 
-# Turso URL ko https:// me convert karein (Render par crash rokne ke liye)
 if TURSO_URL.startswith("libsql://"):
     TURSO_URL = TURSO_URL.replace("libsql://", "https://", 1)
 
-# DB Client initialize karein
 db_client = libsql_client.create_client_sync(
     url=TURSO_URL,
     auth_token=TURSO_AUTH_TOKEN
 )
 
-# Table banayein agar nahi hai
+# Table initialize
 try:
     db_client.execute("CREATE TABLE IF NOT EXISTS videos (id TEXT PRIMARY KEY, video_id TEXT, thumb_id TEXT)")
 except Exception as e:
@@ -62,9 +60,7 @@ def handle_start(message):
     if len(args) > 1:
         vid_id = args[1]
         try:
-            # Turso se video fetch karein
             result = db_client.execute("SELECT video_id FROM videos WHERE id = ?", [vid_id])
-            
             if result.rows:
                 bot.send_message(message.chat.id, "✅ Here is your requested video. Enjoy!")
                 bot.send_video(message.chat.id, result.rows[0][0])
@@ -102,7 +98,7 @@ def process_upload(mgid, chat_id):
     safe_video_id = video_msg.video.file_id
     safe_photo_id = photo_msg.photo[-1].file_id
 
-    # Cloud Storage (Storage Channel) me save karein
+    # 1. Cloud Storage (Storage Channel) me save karein
     if STORAGE_CHANNEL != 0:
         try:
             vid_copy = bot.copy_message(STORAGE_CHANNEL, chat_id, video_msg.message_id)
@@ -112,19 +108,22 @@ def process_upload(mgid, chat_id):
             photo_copy = bot.copy_message(STORAGE_CHANNEL, chat_id, photo_msg.message_id)
             bot.edit_message_caption(chat_id=STORAGE_CHANNEL, message_id=photo_copy.message_id, caption=f"🖼 Thumbnail ID: `{unique_id}`", parse_mode="Markdown")
             safe_photo_id = photo_copy.photo[-1].file_id
+            print("✅ Saved to Storage Channel")
         except Exception as e:
             print(f"⚠️ Cloud storage failed: {e}")
 
-    # Turso DB me save karein
+    # 2. Turso DB me save karein (Agar fail ho toh rukna nahi hai)
     try:
         db_client.execute(
             "INSERT OR REPLACE INTO videos (id, video_id, thumb_id) VALUES (?, ?, ?)",
             [unique_id, safe_video_id, safe_photo_id]
         )
+        print("✅ Saved to Database")
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Database Error: {e}")
-        return
+        print(f"❌ Database Error (Ignoring to send to channel): {e}")
+        bot.send_message(chat_id, f"⚠️ Warning: Video saved in Storage, but DB failed.")
 
+    # 3. Destination Channel me post karein
     bot_username = bot.get_me().username
     mini_app_url = f"https://t.me/{bot_username}/{APP_SHORT_NAME}?startapp={unique_id}"
 
@@ -135,8 +134,10 @@ def process_upload(mgid, chat_id):
     try:
         bot.send_photo(DEST_CHANNEL, safe_photo_id, caption=caption_text, reply_markup=markup)
         bot.send_message(chat_id, f"✅ Uploaded successfully!\nYour Video ID is: `{unique_id}`", parse_mode="Markdown")
+        print("✅ Posted to Destination Channel")
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Failed to send to channel. Error: {e}")
+        bot.send_message(chat_id, f"❌ Failed to send to DEST Channel. Check if bot is Admin & Channel ID is correct. Error: {e}")
+        print(f"❌ Dest Channel Error: {e}")
 
 # ---------- Flask Routes ----------
 @app.route("/health")
@@ -166,7 +167,6 @@ def miniapp_page():
 @app.route("/thumb/<vid_id>")
 def get_thumbnail(vid_id):
     try:
-        # Turso se thumbnail ID fetch karein
         result = db_client.execute("SELECT thumb_id FROM videos WHERE id = ?", [vid_id])
         if not result.rows: abort(404)
         

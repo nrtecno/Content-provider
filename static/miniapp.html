@@ -28,19 +28,19 @@
   
   .ticket-box { background: #1e1e1e; border: 1px dashed #444; border-radius: 12px; padding: 15px 30px; margin-bottom: 20px; text-align: center; width: 100%; max-width: 300px; }
   .ticket-box p { margin: 0 0 5px; font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 1px;}
-  .ticket-box h3 { margin: 0; font-family: monospace; font-size: 24px; color: #2ea6ff; letter-spacing: 2px;}
+  .ticket-box h3 { margin: 0; font-family: monospace; font-size: 20px; color: #2ea6ff; letter-spacing: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
 
   #video-reveal-screen { display: none; flex-direction: column; align-items: center; width: 100%; animation: fadeIn 0.5s; }
   
-  /* Dummy Thumbnail Box (Kyunki DB nahi hai) */
+  /* Real Thumbnail Box */
   .thumbnail-box { 
       width: 100%; max-width: 300px; aspect-ratio: 16/9; 
-      background: linear-gradient(135deg, #18181b, #27272a); 
+      background: #18181b; 
       border-radius: 16px; overflow: hidden; border: 2px solid #3f3f46; 
       margin-bottom: 20px; display: flex; align-items: center; justify-content: center;
       box-shadow: 0 10px 30px rgba(0,0,0,0.5);
   }
-  .thumbnail-box .play-icon { font-size: 50px; opacity: 0.5; }
+  .thumbnail-box img { width: 100%; height: 100%; object-fit: cover; }
   
   .play-redirect-btn { background: linear-gradient(90deg, #06b6d4, #3b82f6); color: #fff; border: none; padding: 16px; border-radius: 12px; font-weight: 700; font-size: 16px; cursor: pointer; width: 100%; max-width: 300px; box-shadow: 0 5px 20px rgba(59, 130, 246, 0.4); }
   
@@ -50,13 +50,26 @@
   .play-btn-main { 
       background: linear-gradient(90deg, #06b6d4, #3b82f6); color: #fff; border: none; 
       padding: 15px 20px; border-radius: 10px; font-weight: 700; font-size: 16px; 
-      cursor: pointer; width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px;
-      box-shadow: 0 4px 15px rgba(6, 182, 212, 0.3); transition: 0.2s;
+      cursor: pointer; width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;
+      box-shadow: 0 4px 15px rgba(6, 182, 212, 0.3); transition: 0.2s; position: relative;
   }
   .play-btn-main:active { transform: scale(0.98); }
   .play-btn-main:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .btn-adsgram { background: linear-gradient(90deg, #8b5cf6, #d946ef); box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3); }
+
+  /* BEST Badge Styling */
+  .best-badge {
+      background: #22c55e; color: #fff; font-size: 10px; padding: 3px 8px;
+      border-radius: 20px; margin-left: 5px; font-weight: 800;
+      box-shadow: 0 2px 5px rgba(34, 197, 94, 0.4); animation: pulse 1.5s infinite;
+  }
+
+  @keyframes pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.1); box-shadow: 0 0 10px #22c55e; }
+      100% { transform: scale(1); }
+  }
   
   #status-overlay { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.95); padding: 20px 30px; border-radius: 12px; color: #fff; font-size: 15px; display: none; z-index: 1000; text-align: center; border: 1px solid #333; width: 220px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);}
   
@@ -82,7 +95,7 @@
     
     <div class="btn-group">
         <button id="btn-player1" class="play-btn-main">
-            ▶ Player 1 (Monetag Ad)
+            ▶ Player 1 (Monetag Ad) <span class="best-badge">🔥 BEST</span>
         </button>
         <button id="btn-player2" class="play-btn-main btn-adsgram">
             ▶ Player 2 (Adsgram Ad)
@@ -90,9 +103,9 @@
     </div>
   </div>
 
-  <!-- Screen 2: Unlocked Video (Dummy Thumbnail + Bot Link) -->
+  <!-- Screen 2: Unlocked Video (Real Thumbnail) -->
   <div id="video-reveal-screen">
-    <div class="thumbnail-box"><div class="play-icon">🎬</div></div>
+    <div class="thumbnail-box"><img id="thumb-img" src="" alt="Thumbnail"></div>
     <button id="redirect-btn" class="play-redirect-btn">▶ Play Video on Bot</button>
     <p style="color: #71717a; font-size: 12px; margin-top: 15px; text-align: center;">You will be redirected to our Bot to receive the video securely.</p>
   </div>
@@ -103,7 +116,7 @@
   const tg = window.Telegram && window.Telegram.WebApp;
   if (tg) { try { tg.ready(); tg.expand(); } catch(e){} }
 
-  // URL ya Telegram startapp se ID nikaalein
+  // Ab ID chhoti hai (jaise "25"), toh direct milegi
   let vidId = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) ? tg.initDataUnsafe.start_param : new URLSearchParams(window.location.search).get('id');
   
   const displayId = document.getElementById('display-id');
@@ -111,13 +124,15 @@
   const btnPlayer2 = document.getElementById('btn-player2');
   const initialScreen = document.getElementById('initial-screen');
   const revealScreen = document.getElementById('video-reveal-screen');
+  const thumbImg = document.getElementById('thumb-img');
   const redirectBtn = document.getElementById('redirect-btn');
   const statusOverlay = document.getElementById('status-overlay');
 
   if (!vidId) { displayId.textContent = "ERROR"; btnPlayer1.disabled = true; btnPlayer2.disabled = true; return; }
+  
   displayId.textContent = vidId;
 
-  // Initialize Adsgram
+  // Adsgram Initialize
   let AdController = null;
   try {
     if (window.Adsgram) {
@@ -125,7 +140,7 @@
     }
   } catch (e) { console.warn('Adsgram init failed', e); }
 
-  // --- PLAYER 1: MONETAG AD (Strict Rule) ---
+  // --- PLAYER 1: MONETAG AD ---
   btnPlayer1.addEventListener('click', function() {
     btnPlayer1.disabled = true;
     btnPlayer2.disabled = true;
@@ -134,11 +149,9 @@
 
     if (typeof window['show___MONETAG_ZONE__'] === 'function') {
         window['show___MONETAG_ZONE__']().then(() => {
-            // Ad Watched Successfully
             statusOverlay.style.display = 'none';
             showRevealScreen();
         }).catch(() => {
-            // Ad Skipped or Failed (Strict Rule)
             statusOverlay.style.display = 'none';
             alert("❌ You must watch the full ad to unlock the video!");
             btnPlayer1.disabled = false;
@@ -152,10 +165,10 @@
     }
   });
 
-  // --- PLAYER 2: ADSGRAM AD (Strict Rule) ---
+  // --- PLAYER 2: ADSGRAM AD ---
   btnPlayer2.addEventListener('click', function() {
     if (!AdController) {
-        alert("Adsgram is not initialized. (Check block ID)");
+        alert("Adsgram is not initialized.");
         return;
     }
 
@@ -165,20 +178,15 @@
     statusOverlay.innerHTML = 'Loading Adsgram Ad...';
 
     AdController.show().then(() => {
-        // Ad Watched Successfully
         statusOverlay.style.display = 'none';
         showRevealScreen();
     }).catch((err) => {
-        // Ad Skipped or Failed (Strict Rule)
-        console.warn("Adsgram Error:", err);
         statusOverlay.style.display = 'none';
-        
         if(err && err.toString().includes("not active")) {
              alert("❌ Adsgram Block is not active yet. Please use Player 1.");
         } else {
              alert("❌ You must watch the full ad to unlock the video!");
         }
-        
         btnPlayer1.disabled = false;
         btnPlayer2.disabled = false;
     });
@@ -187,9 +195,10 @@
   function showRevealScreen() {
     initialScreen.style.display = 'none';
     revealScreen.style.display = 'flex';
+    // Real Thumbnail Load Karein
+    thumbImg.src = '/thumb/' + encodeURIComponent(vidId);
   }
 
-  // Redirect to Bot
   redirectBtn.addEventListener('click', function() {
     const botUsername = "__BOT_USERNAME__"; 
     const botLink = `https://t.me/${botUsername}?start=${vidId}`;

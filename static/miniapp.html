@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Nebula Video Player</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+<!-- 1. MONETAG SDK -->
+<script src='//libtl.com/sdk.js' data-zone='12127485' data-sdk='show_12127485'></script>
+
+<!-- 2. TADS SDK (यहाँ अपना TADS स्क्रिप्ट पेस्ट करें) -->
+<!-- <script src="https://YOUR_TADS_SCRIPT.js"></script> -->
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background-color: #09090b; color: #fff; font-family: 'Inter', sans-serif; min-height: 100vh; display: flex; flex-direction: column; }
+  .top-banner { background: linear-gradient(90deg, #4f46e5, #9333ea); padding: 12px 15px; margin: 15px; border-radius: 12px; display: flex; align-items: center; justify-content: space-between; text-decoration: none; color: white; }
+  .banner-text { font-size: 13px; font-weight: 600; }
+  .banner-text span { font-weight: 400; font-size: 11px; color: #e9d5ff; display: block; }
+  .banner-btn { background: #fff; color: #4f46e5; padding: 6px 12px; border-radius: 8px; font-weight: 700; font-size: 12px; }
+  .main-content { padding: 0 20px; display: flex; flex-direction: column; align-items: center; flex-grow: 1; justify-content: center; }
+  #video-reveal-screen { display: none; flex-direction: column; align-items: center; width: 100%; animation: fadeIn 0.5s; }
+  .thumbnail-box { width: 100%; max-width: 300px; aspect-ratio: 16/9; background: #18181b; border-radius: 16px; overflow: hidden; border: 2px solid #27272a; margin-bottom: 20px; }
+  .thumbnail-box img { width: 100%; height: 100%; object-fit: cover; }
+  .play-redirect-btn { background: linear-gradient(90deg, #06b6d4, #3b82f6); color: #fff; border: none; padding: 16px; border-radius: 12px; font-weight: 700; font-size: 16px; cursor: pointer; width: 100%; max-width: 300px; box-shadow: 0 5px 20px rgba(59, 130, 246, 0.4); }
+  .input-box { display: flex; background: #18181b; border: 1px solid #27272a; border-radius: 12px; padding: 8px; align-items: center; width: 100%; max-width: 350px; margin-top: 15px;}
+  .input-box input { flex-grow: 1; background: transparent; border: none; color: #e4e4e7; font-size: 13px; padding: 10px; outline: none; }
+  .play-btn-main { background: linear-gradient(90deg, #06b6d4, #3b82f6); color: #fff; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 700; font-size: 14px; cursor: pointer; }
+  #status-overlay { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); padding: 20px 30px; border-radius: 12px; color: #fff; font-size: 15px; display: none; z-index: 1000; text-align: center; border: 1px solid #333; width: 200px;}
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+</head>
+<body>
+<div id="status-overlay">Loading Ad...</div>
+
+<a href="https://t.me/nr_hackz" target="_blank" class="top-banner">
+  <div class="banner-text">💎 Super Tech Channel<br><span>Join @nr_hackz for premium tech & hacks!</span></div>
+  <div class="banner-btn">Join Now →</div>
+</a>
+
+<div class="main-content">
+  <div id="initial-screen" style="text-align: center; width: 100%;">
+    <div style="font-size: 50px; margin-bottom: 10px;">▶️</div>
+    <h2 style="margin-bottom: 5px;">Nebula Player</h2>
+    <p style="color: #a1a1aa; font-size: 13px;">Tap Play to unlock your video</p>
+    <div class="input-box">
+      <input type="text" id="url-input" readonly value="Loading...">
+      <button id="play-trigger-btn" class="play-btn-main">▶ Play</button>
+    </div>
+  </div>
+
+  <div id="video-reveal-screen">
+    <div class="thumbnail-box"><img id="thumb-img" src="" alt="Thumbnail"></div>
+    <button id="redirect-btn" class="play-redirect-btn">▶ Play Video on Bot</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  const tg = window.Telegram && window.Telegram.WebApp;
+  if (tg) { try { tg.ready(); tg.expand(); } catch(e){} }
+
+  let vidId = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) ? tg.initDataUnsafe.start_param : new URLSearchParams(window.location.search).get('id');
+  
+  const inputEl = document.getElementById('url-input');
+  const playBtn = document.getElementById('play-trigger-btn');
+  const initialScreen = document.getElementById('initial-screen');
+  const revealScreen = document.getElementById('video-reveal-screen');
+  const thumbImg = document.getElementById('thumb-img');
+  const redirectBtn = document.getElementById('redirect-btn');
+  const statusOverlay = document.getElementById('status-overlay');
+
+  if (!vidId) { inputEl.value = "Error: No ID"; playBtn.disabled = true; return; }
+  inputEl.value = "https://filesadda.site/" + vidId;
+
+  // TADS INITIALIZATION (अगर आपके पास TADS ऑब्जेक्ट है तो यहाँ सेट करें)
+  const tadsAd = null; // उदाहरण: new TADS.Widget(...)
+
+  playBtn.addEventListener('click', function() {
+    playBtn.disabled = true;
+    statusOverlay.style.display = 'block';
+    statusOverlay.innerHTML = 'Loading Ad...<br><span style="font-size:11px;color:#aaa;">Network 1</span>';
+
+    let adFinished = false; // 🔒 लॉक: ताकि दोनों ऐड एक साथ न चलें
+
+    // ⏱️ 4 सेकंड का टाइमर (Monetag के लिए)
+    const monetagTimeout = setTimeout(() => {
+        if (!adFinished) {
+            console.warn('Monetag timeout. Switching to TADS...');
+            tryTads(); // 4 सेकंड में नहीं आया तो TADS पर जाएँ
+        }
+    }, 4000);
+
+    // 🟢 नेटवर्क 1: MONETAG
+    if (typeof show_12127485 === 'function') {
+        show_12127485().then(() => {
+            adFinished = true;
+            clearTimeout(monetagTimeout);
+            statusOverlay.style.display = 'none';
+            showRevealScreen();
+        }).catch(() => {
+            adFinished = true;
+            clearTimeout(monetagTimeout);
+            tryTads(); // अगर Monetag फेल हो जाए
+        });
+    } else {
+        clearTimeout(monetagTimeout);
+        tryTads();
+    }
+  });
+
+  // 🔵 नेटवर्क 2: TADS (Fallback)
+  function tryTads() {
+      if (tadsAd) {
+          statusOverlay.innerHTML = 'Loading Ad...<br><span style="font-size:11px;color:#aaa;">Network 2</span>';
+          tadsAd.show().then(() => {
+              statusOverlay.style.display = 'none';
+              showRevealScreen();
+          }).catch(() => {
+              statusOverlay.style.display = 'none';
+              showRevealScreen(); // दोनों फेल होने पर सीधे वीडियो
+          });
+      } else {
+          statusOverlay.style.display = 'none';
+          showRevealScreen(); // TADS कॉन्फ़िगर नहीं है
+      }
+  }
+
+  function showRevealScreen() {
+    initialScreen.style.display = 'none';
+    revealScreen.style.display = 'flex';
+    thumbImg.src = '/thumb/' + encodeURIComponent(vidId);
+  }
+
+  redirectBtn.addEventListener('click', function() {
+    // ⚠️ अपना नया बॉट यूजरनेम यहाँ डालें (बिना @ के) ⚠️
+    const botUsername = "YOUR_NEW_BOT_USERNAME"; 
+    const botLink = `https://t.me/${botUsername}?start=${vidId}`;
+    if (tg) { tg.openTelegramLink(botLink); } else { window.open(botLink, '_blank'); }
+  });
+})();
+</script>
+</body>
+</html>

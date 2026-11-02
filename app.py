@@ -178,7 +178,11 @@ def handle_start(message):
         except Exception as e:
             bot.send_message(message.chat.id, "❌ Video not found or deleted.")
     else:
-        bot.send_message(message.chat.id, "👋 Welcome! Send me a Photo and Video **together** to generate a new link.")
+        # 🟢 YAHAN CHANGE HUA HAI (Custom message for Admin)
+        if message.from_user.id == ADMIN_ID:
+            bot.send_message(message.chat.id, "ready hu boss... Thumbnail ke sath video bhejo")
+        else:
+            bot.send_message(message.chat.id, "👋 Welcome! Send me a Photo and Video **together** to generate a new link.")
 
 # ---------- Upload Processing ----------
 def process_upload(mgid, chat_id):

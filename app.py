@@ -34,6 +34,7 @@ app = Flask(__name__, static_folder="static")
 media_buffer = {}
 buffer_lock = threading.Lock()
 broadcast_mode = False
+admin_waiting_for_sender_id = False # Naya variable
 
 # ---------- File Management Helpers ----------
 USERS_FILE = "users.json"
@@ -81,7 +82,7 @@ def delete_message_after_delay(chat_id, message_id, delay_seconds):
         print(f"⚠️ Failed to delete message: {e}")
 
 # ==========================================
-# 🚨 COMMANDS (SABSE PEHLE RAKHE HAIN)
+# 🚨 COMMANDS
 # ==========================================
 
 @bot.message_handler(commands=['start'])
@@ -122,7 +123,6 @@ def handle_start(message):
         except Exception as e:
             bot.send_message(message.chat.id, "❌ Video not found or deleted.")
     else:
-        # 🟢 YAHAN CUSTOM MESSAGES SET KIYE HAIN
         if message.from_user.id == ADMIN_ID:
             bot.send_message(message.chat.id, "ready hu boss... Thumbnail ke sath video bhejo")
         elif message.from_user.id in load_senders():
@@ -132,7 +132,6 @@ def handle_start(message):
 
 @bot.message_handler(commands=['broadcast'])
 def cmd_broadcast(message):
-    # 🟢 YAHAN CHANGE HUA HAI
     if message.from_user.id != ADMIN_ID: 
         bot.reply_to(message, "you are not admin..")
         return
@@ -145,32 +144,16 @@ def cmd_broadcast(message):
 
 @bot.message_handler(commands=['sender'])
 def cmd_sender(message):
-    user_id = message.from_user.id
-    if user_id == ADMIN_ID:
-        bot.reply_to(message, "Aap khud Admin hain.")
+    global admin_waiting_for_sender_id
+    if message.from_user.id != ADMIN_ID: 
+        bot.reply_to(message, "you are not admin..")
         return
     
-    if user_id in load_senders():
-        bot.reply_to(message, "✅ Aap already approved sender hain! Aap video bhej sakte hain.")
-        return
-        
-    markup = InlineKeyboardMarkup().add(
-        InlineKeyboardButton("✅ Accept", callback_data=f"acc_{user_id}"),
-        InlineKeyboardButton("❌ Reject", callback_data=f"rej_{user_id}")
-    )
-    admin_msg = f"🔔 **New Sender Request!**\n\nName: {message.from_user.first_name}\nUsername: @{message.from_user.username}\nID: `{user_id}`"
-    
-    # 🟢 TRY-EXCEPT ADD KIYA HAI TAAKI BOT CRASH NA HO
-    try:
-        bot.send_message(ADMIN_ID, admin_msg, reply_markup=markup, parse_mode="Markdown")
-        bot.reply_to(message, "⏳ Aapki request Admin ko bhej di gayi hai. Approval ka wait karein.")
-    except Exception as e:
-        bot.reply_to(message, "❌ Admin ko message nahi bhej paye (Admin ID check karein).")
-        print(f"Sender request error: {e}")
+    admin_waiting_for_sender_id = True
+    bot.send_message(message.chat.id, "👤 Kripya us user ki **Telegram Numerical ID** bhejein jise aap Sender banana chahte hain.")
 
 @bot.message_handler(commands=['senders'])
 def cmd_senders(message):
-    # 🟢 YAHAN CHANGE HUA HAI
     if message.from_user.id != ADMIN_ID: 
         bot.reply_to(message, "you are not admin..")
         return
@@ -203,33 +186,35 @@ def callback_broadcast(call):
         broadcast_mode = False
         bot.edit_message_text("❌ **Broadcast Mode: OFF**", call.message.chat.id, call.message.message_id, parse_mode="Markdown")
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith(('acc_', 'rej_', 'rem_')))
-def handle_sender_callbacks(call):
+@bot.callback_query_handler(func=lambda call: call.data.startswith('rem_'))
+def handle_remove_sender(call):
     if call.from_user.id != ADMIN_ID: return
-    
-    action, uid_str = call.data.split('_')
-    uid = int(uid_str)
-    
-    if action == 'acc':
-        add_sender(uid)
-        bot.edit_message_text(f"✅ User `{uid}` approved as Sender!", call.message.chat.id, call.message.message_id, parse_mode="Markdown")
-        bot.send_message(uid, "🎉 **Congratulations!** Aapko video upload karne ki permission mil gayi hai.")
-    elif action == 'rej':
-        bot.edit_message_text(f"❌ User `{uid}` request rejected.", call.message.chat.id, call.message.message_id, parse_mode="Markdown")
-        bot.send_message(uid, "❌ Aapki sender request Admin dwara reject kar di gayi hai.")
-    elif action == 'rem':
-        remove_sender(uid)
-        bot.edit_message_text(f"🗑️ User `{uid}` removed from Sender list.", call.message.chat.id, call.message.message_id, parse_mode="Markdown")
-        bot.send_message(uid, "⚠️ Aapko video upload karne ki permission se hata diya gaya hai.")
+    uid = int(call.data.split('_')[1])
+    remove_sender(uid)
+    bot.edit_message_text(f"🗑️ User `{uid}` removed from Sender list.", call.message.chat.id, call.message.message_id, parse_mode="Markdown")
+    bot.send_message(uid, "⚠️ Aapko video upload karne ki permission se hata diya gaya hai.")
 
 # ==========================================
-# MAIN HANDLER (UPLOADS & BROADCAST MESSAGES)
+# MAIN HANDLER
 # ==========================================
 @bot.message_handler(content_types=['text', 'photo', 'video', 'document', 'audio'])
 def handle_all_messages(message):
-    global broadcast_mode
+    global broadcast_mode, admin_waiting_for_sender_id
     
-    # 1. BROADCAST CHECK
+    # 1. ADMIN ID CAPTURE
+    if admin_waiting_for_sender_id and message.from_user.id == ADMIN_ID:
+        try:
+            new_sender_id = int(message.text.strip())
+            add_sender(new_sender_id)
+            bot.reply_to(message, f"✅ User `{new_sender_id}` ko Sender bana diya gaya hai.")
+            bot.send_message(new_sender_id, "Congratulations 🎉.. you are sender...")
+        except ValueError:
+            bot.reply_to(message, "❌ Galat ID! Kripya sahi numerical ID bhejein.")
+        
+        admin_waiting_for_sender_id = False
+        return
+
+    # 2. BROADCAST CHECK
     if broadcast_mode and message.from_user.id == ADMIN_ID:
         users = load_users()
         if not users:
@@ -250,11 +235,11 @@ def handle_all_messages(message):
         broadcast_mode = False
         return
 
-    # 2. UPLOAD PERMISSION CHECK
+    # 3. UPLOAD PERMISSION CHECK
     senders = load_senders()
     if message.from_user.id != ADMIN_ID and message.from_user.id not in senders:
         if message.content_type in ['photo', 'video']:
-            bot.reply_to(message, "❌ Access Denied!\nPermission ke liye /sender command bhejein.")
+            bot.reply_to(message, "❌ Access Denied!\nAap is bot par video upload nahi kar sakte.")
         return
 
     if message.content_type not in ['photo', 'video']:

@@ -15,7 +15,7 @@ PUBLIC_URL = os.getenv("PUBLIC_URL", "").rstrip("/")
 ADMIN_KEY = os.getenv("ADMIN_KEY", "test123")
 APP_SHORT_NAME = os.getenv("APP_SHORT_NAME", "Wach")
 
-# Admin ID (Sirf aap upload aur broadcast kar sakein)
+# Admin ID (Sirf aapke paas full access hoga)
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0")) 
 
 # Frontend Variables
@@ -33,46 +33,58 @@ app = Flask(__name__, static_folder="static")
 
 media_buffer = {}
 buffer_lock = threading.Lock()
-
-# ---------- Broadcast & User Database ----------
 broadcast_mode = False
+
+# ---------- File Management Helpers ----------
 USERS_FILE = "users.json"
+SENDERS_FILE = "senders.json"
+DB_FILE = "data.json"
 
-def load_users():
-    if os.path.exists(USERS_FILE):
+def load_json(filename, default):
+    if os.path.exists(filename):
         try:
-            with open(USERS_FILE, "r") as f: return json.load(f)
-        except: return []
-    return []
+            with open(filename, "r") as f: return json.load(f)
+        except: return default
+    return default
 
+def save_json(filename, data):
+    with open(filename, "w") as f: json.dump(data, f)
+
+# User (for Broadcast)
+def load_users(): return load_json(USERS_FILE, [])
 def save_user(user_id):
     users = load_users()
     if user_id not in users:
         users.append(user_id)
-        with open(USERS_FILE, "w") as f: json.dump(users, f)
+        save_json(USERS_FILE, users)
 
-# ---------- Local JSON Cache (For Old Videos) ----------
-DB_FILE = "data.json"
-def load_db():
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, "r") as f: return json.load(f)
-        except: return {}
-    return {}
+# Approved Senders (for Upload permission)
+def load_senders(): return load_json(SENDERS_FILE, [])
+def add_sender(user_id):
+    senders = load_senders()
+    if user_id not in senders:
+        senders.append(user_id)
+        save_json(SENDERS_FILE, senders)
+def remove_sender(user_id):
+    senders = load_senders()
+    if user_id in senders:
+        senders.remove(user_id)
+        save_json(SENDERS_FILE, senders)
 
-def save_db(data):
-    with open(DB_FILE, "w") as f: json.dump(data, f)
+# Video DB (Thumbnail + Video mapping)
+def load_db(): return load_json(DB_FILE, {})
+def save_db(data): save_json(DB_FILE, data)
+
 
 # ---------- Auto Delete Function ----------
 def delete_message_after_delay(chat_id, message_id, delay_seconds):
     time.sleep(delay_seconds)
     try:
         bot.delete_message(chat_id, message_id)
-        print(f"🗑️ Auto-deleted video from chat {chat_id}")
     except Exception as e:
         print(f"⚠️ Failed to delete message: {e}")
 
-# ---------- Broadcast Handlers ----------
+# ---------- Broadcast Command (Admin Only) ----------
 @bot.message_handler(commands=['broadcast'])
 def cmd_broadcast(message):
     if message.from_user.id != ADMIN_ID: return
@@ -95,12 +107,72 @@ def callback_broadcast(call):
         broadcast_mode = False
         bot.edit_message_text("❌ **Broadcast Mode: OFF**\n\nBot ab normal mode me kaam kar raha hai.", call.message.chat.id, call.message.message_id, parse_mode="Markdown")
 
-# ---------- Main Message Handler (Broadcast + Uploads) ----------
+# ---------- Sender Commands ----------
+@bot.message_handler(commands=['sender'])
+def cmd_sender(message):
+    user_id = message.from_user.id
+    if user_id == ADMIN_ID:
+        bot.reply_to(message, "Aap khud Admin hain, aapko permission ki zaroorat nahi hai.")
+        return
+    
+    if user_id in load_senders():
+        bot.reply_to(message, "✅ Aap already approved sender hain! Aap video bhej sakte hain.")
+        return
+        
+    # Send request to Admin
+    markup = InlineKeyboardMarkup().add(
+        InlineKeyboardButton("✅ Accept", callback_data=f"acc_{user_id}"),
+        InlineKeyboardButton("❌ Reject", callback_data=f"rej_{user_id}")
+    )
+    admin_msg = f"🔔 **New Sender Request!**\n\nName: {message.from_user.first_name}\nUsername: @{message.from_user.username}\nID: `{user_id}`"
+    bot.send_message(ADMIN_ID, admin_msg, reply_markup=markup, parse_mode="Markdown")
+    bot.reply_to(message, "⏳ Aapki request Admin ko bhej di gayi hai. Approval ka wait karein.")
+
+@bot.message_handler(commands=['senders'])
+def cmd_senders(message):
+    if message.from_user.id != ADMIN_ID: return
+    
+    senders = load_senders()
+    if not senders:
+        bot.send_message(message.chat.id, "📭 Koi approved sender nahi hai abhi.")
+        return
+    
+    bot.send_message(message.chat.id, "👥 **Approved Senders List:**\nNeeche diye gaye button se kisi bhi sender ko remove kar sakte hain.")
+    
+    for uid in senders:
+        markup = InlineKeyboardMarkup().add(
+            InlineKeyboardButton(f"🗑️ Remove Sender ({uid})", callback_data=f"rem_{uid}")
+        )
+        bot.send_message(message.chat.id, f"User ID: `{uid}`", reply_markup=markup, parse_mode="Markdown")
+
+# ---------- Callback Handlers (Accept/Reject/Remove) ----------
+@bot.callback_query_handler(func=lambda call: call.data.startswith(('acc_', 'rej_', 'rem_')))
+def handle_sender_callbacks(call):
+    if call.from_user.id != ADMIN_ID: return
+    
+    action, uid_str = call.data.split('_')
+    uid = int(uid_str)
+    
+    if action == 'acc':
+        add_sender(uid)
+        bot.edit_message_text(f"✅ User `{uid}` approved as Sender!", call.message.chat.id, call.message.message_id, parse_mode="Markdown")
+        bot.send_message(uid, "🎉 **Congratulations!** Aapko video upload karne ki permission mil gayi hai. Ab aap Photo+Video bhej sakte hain.")
+    
+    elif action == 'rej':
+        bot.edit_message_text(f"❌ User `{uid}` request rejected.", call.message.chat.id, call.message.message_id, parse_mode="Markdown")
+        bot.send_message(uid, "❌ Aapki sender request Admin dwara reject kar di gayi hai.")
+        
+    elif action == 'rem':
+        remove_sender(uid)
+        bot.edit_message_text(f"🗑️ User `{uid}` removed from Sender list.", call.message.chat.id, call.message.message_id, parse_mode="Markdown")
+        bot.send_message(uid, "⚠️ Aapko video upload karne ki permission se hata diya gaya hai.")
+
+# ---------- Main Message Handler (Broadcast, Uploads) ----------
 @bot.message_handler(content_types=['text', 'photo', 'video', 'document', 'audio'])
 def handle_all_messages(message):
     global broadcast_mode
     
-    # 1. BROADCAST CHECK (Agar ON hai aur Admin ne bheja hai)
+    # 1. BROADCAST CHECK (Only Admin)
     if broadcast_mode and message.from_user.id == ADMIN_ID:
         users = load_users()
         if not users:
@@ -113,22 +185,23 @@ def handle_all_messages(message):
             try:
                 bot.copy_message(uid, message.chat.id, message.message_id)
                 success += 1
-                time.sleep(0.05) # Telegram Rate Limit se bachne ke liye
+                time.sleep(0.05)
             except Exception as e:
-                print(f"Failed to send to {uid}: {e}")
+                pass
         
-        bot.send_message(message.chat.id, f"✅ **Broadcast Complete!**\nSent to {success} users successfully.")
-        broadcast_mode = False # Kaam khatam, auto-off
+        bot.send_message(message.chat.id, f"✅ **Broadcast Complete!**\nSent to {success} users.")
+        broadcast_mode = False
         return
 
-    # 2. NORMAL UPLOAD CHECK
-    if message.from_user.id != ADMIN_ID:
+    # 2. UPLOAD PERMISSION CHECK (Admin or Approved Sender)
+    senders = load_senders()
+    if message.from_user.id != ADMIN_ID and message.from_user.id not in senders:
         if message.content_type in ['photo', 'video']:
-            bot.reply_to(message, "❌ Access Denied!\nAap is bot par video upload nahi kar sakte.")
+            bot.reply_to(message, "❌ Access Denied!\nAap is bot par video upload nahi kar sakte. Permission ke liye /sender command bhejein.")
         return
 
     if message.content_type not in ['photo', 'video']:
-        return # Normal text ignore karega
+        return
 
     if not message.media_group_id:
         bot.reply_to(message, "⚠️ Please send the Photo and Video **together** as an album.")
@@ -142,7 +215,7 @@ def handle_all_messages(message):
 # ---------- Bot Start Handler ----------
 @bot.message_handler(commands=['start'])
 def handle_start(message):
-    save_user(message.chat.id) # Naye user ko save karein
+    save_user(message.chat.id)
     
     args = message.text.split()
     if len(args) > 1:
@@ -178,11 +251,11 @@ def handle_start(message):
         except Exception as e:
             bot.send_message(message.chat.id, "❌ Video not found or deleted.")
     else:
-        # 🟢 YAHAN CHANGE HUA HAI (Custom message for Admin)
+        # Custom message for Admin
         if message.from_user.id == ADMIN_ID:
             bot.send_message(message.chat.id, "ready hu boss... Thumbnail ke sath video bhejo")
         else:
-            bot.send_message(message.chat.id, "👋 Welcome! Send me a Photo and Video **together** to generate a new link.")
+            bot.send_message(message.chat.id, "👋 Welcome! Video dekhne ke liye link kholen ya upload karne ki permission ke liye /sender bhejein.")
 
 # ---------- Upload Processing ----------
 def process_upload(mgid, chat_id):
@@ -265,8 +338,9 @@ def get_thumbnail(vid_id):
         if not entry or "thumb" not in entry: abort(404)
         
         file_info = bot.get_file(entry["thumb"])
-        tg_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}"
-        req = requests.get(tg_url, stream=True)
+        tg_url = f"https://api.telegram.org/bot{BOT_TOKEN}/getFile?file_id={entry['thumb']}"
+        file_path = file_info.file_path
+        req = requests.get(f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}", stream=True)
         return Response(req.iter_content(chunk_size=1024), content_type='image/jpeg')
     except Exception:
         abort(404)

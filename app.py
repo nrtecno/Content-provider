@@ -34,7 +34,7 @@ app = Flask(__name__, static_folder="static")
 media_buffer = {}
 buffer_lock = threading.Lock()
 broadcast_mode = False
-admin_waiting_for_sender_id = False # Naya variable
+admin_waiting_for_sender_id = False 
 
 # ---------- File Management Helpers ----------
 USERS_FILE = "users.json"
@@ -105,8 +105,10 @@ def handle_start(message):
             entry = video_db.get(unique_id)
             
             if entry and "video" in entry:
-                sent_video = bot.send_video(chat_id, entry["video"])
+                # Yahan bhi spoiler add kar diya hai taaki user ko hidden video mile
+                sent_video = bot.send_video(chat_id, entry["video"], has_spoiler=True)
             else:
+                # Copy message pehle se hi spoiler retain karta hai agar source me tha
                 sent_video = bot.copy_message(
                     chat_id=chat_id, 
                     from_chat_id=STORAGE_CHANNEL, 
@@ -269,6 +271,10 @@ def process_upload(mgid, chat_id):
 
     original_video_id = video_msg.video.file_id
     original_photo_id = photo_msg.photo[-1].file_id
+    
+    # 🟢 NAYA: Spoiler flag check karein
+    has_spoiler = getattr(photo_msg, 'has_media_spoiler', False)
+
     unique_id = str(int(time.time())) 
 
     if STORAGE_CHANNEL != 0:
@@ -297,7 +303,14 @@ def process_upload(mgid, chat_id):
     caption_text = "🎬 Watch this video for FREE!\n\n▶️ Tap the button below to play instantly"
 
     try:
-        bot.send_photo(DEST_CHANNEL, original_photo_id, caption=caption_text, reply_markup=markup)
+        # 🟢 YAHAN CHANGE HUA HAI: has_spoiler=True add kiya gaya hai
+        bot.send_photo(
+            DEST_CHANNEL, 
+            original_photo_id, 
+            caption=caption_text, 
+            reply_markup=markup,
+            has_spoiler=has_spoiler 
+        )
         bot.send_message(chat_id, f"✅ Uploaded successfully!\nYour Video ID is: `{unique_id}`", parse_mode="Markdown")
     except Exception as e:
         bot.send_message(chat_id, f"❌ Dest Channel Error: {e}")

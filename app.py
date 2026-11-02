@@ -122,14 +122,21 @@ def handle_start(message):
         except Exception as e:
             bot.send_message(message.chat.id, "❌ Video not found or deleted.")
     else:
+        # 🟢 YAHAN CUSTOM MESSAGES SET KIYE HAIN
         if message.from_user.id == ADMIN_ID:
             bot.send_message(message.chat.id, "ready hu boss... Thumbnail ke sath video bhejo")
+        elif message.from_user.id in load_senders():
+            bot.send_message(message.chat.id, "✅ Aap approved sender hain. Thumbnail ke sath video bhejo.")
         else:
-            bot.send_message(message.chat.id, "👋 Welcome! Video dekhne ke liye link kholen ya upload permission ke liye /sender bhejein.")
+            bot.send_message(message.chat.id, "you are not admin or sender...")
 
 @bot.message_handler(commands=['broadcast'])
 def cmd_broadcast(message):
-    if message.from_user.id != ADMIN_ID: return
+    # 🟢 YAHAN CHANGE HUA HAI
+    if message.from_user.id != ADMIN_ID: 
+        bot.reply_to(message, "you are not admin..")
+        return
+    
     markup = InlineKeyboardMarkup().add(
         InlineKeyboardButton("🟢 ON (Start Broadcast)", callback_data="bc_on"),
         InlineKeyboardButton("🔴 OFF (Stop Broadcast)", callback_data="bc_off")
@@ -152,12 +159,21 @@ def cmd_sender(message):
         InlineKeyboardButton("❌ Reject", callback_data=f"rej_{user_id}")
     )
     admin_msg = f"🔔 **New Sender Request!**\n\nName: {message.from_user.first_name}\nUsername: @{message.from_user.username}\nID: `{user_id}`"
-    bot.send_message(ADMIN_ID, admin_msg, reply_markup=markup, parse_mode="Markdown")
-    bot.reply_to(message, "⏳ Aapki request Admin ko bhej di gayi hai.")
+    
+    # 🟢 TRY-EXCEPT ADD KIYA HAI TAAKI BOT CRASH NA HO
+    try:
+        bot.send_message(ADMIN_ID, admin_msg, reply_markup=markup, parse_mode="Markdown")
+        bot.reply_to(message, "⏳ Aapki request Admin ko bhej di gayi hai. Approval ka wait karein.")
+    except Exception as e:
+        bot.reply_to(message, "❌ Admin ko message nahi bhej paye (Admin ID check karein).")
+        print(f"Sender request error: {e}")
 
 @bot.message_handler(commands=['senders'])
 def cmd_senders(message):
-    if message.from_user.id != ADMIN_ID: return
+    # 🟢 YAHAN CHANGE HUA HAI
+    if message.from_user.id != ADMIN_ID: 
+        bot.reply_to(message, "you are not admin..")
+        return
     
     senders = load_senders()
     if not senders:

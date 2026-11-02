@@ -15,6 +15,10 @@ PUBLIC_URL = os.getenv("PUBLIC_URL", "").rstrip("/")
 ADMIN_KEY = os.getenv("ADMIN_KEY", "test123")
 APP_SHORT_NAME = os.getenv("APP_SHORT_NAME", "Wach")
 
+# Admin ID (Sirf aap upload aur broadcast kar sakein)
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0")) 
+
+# Frontend Variables
 BOT_USERNAME = os.getenv("BOT_USERNAME", "")
 MONETAG_ZONE = os.getenv("MONETAG_ZONE", "")
 CHANNEL_LINK = os.getenv("CHANNEL_LINK", "https://t.me/nr_hackz")
@@ -30,7 +34,24 @@ app = Flask(__name__, static_folder="static")
 media_buffer = {}
 buffer_lock = threading.Lock()
 
-# ---------- Local JSON Cache ----------
+# ---------- Broadcast & User Database ----------
+broadcast_mode = False
+USERS_FILE = "users.json"
+
+def load_users():
+    if os.path.exists(USERS_FILE):
+        try:
+            with open(USERS_FILE, "r") as f: return json.load(f)
+        except: return []
+    return []
+
+def save_user(user_id):
+    users = load_users()
+    if user_id not in users:
+        users.append(user_id)
+        with open(USERS_FILE, "w") as f: json.dump(users, f)
+
+# ---------- Local JSON Cache (For Old Videos) ----------
 DB_FILE = "data.json"
 def load_db():
     if os.path.exists(DB_FILE):
@@ -51,9 +72,78 @@ def delete_message_after_delay(chat_id, message_id, delay_seconds):
     except Exception as e:
         print(f"⚠️ Failed to delete message: {e}")
 
-# ---------- Bot Handlers ----------
+# ---------- Broadcast Handlers ----------
+@bot.message_handler(commands=['broadcast'])
+def cmd_broadcast(message):
+    if message.from_user.id != ADMIN_ID: return
+    markup = InlineKeyboardMarkup().add(
+        InlineKeyboardButton("🟢 ON (Start Broadcast)", callback_data="bc_on"),
+        InlineKeyboardButton("🔴 OFF (Stop Broadcast)", callback_data="bc_off")
+    )
+    bot.send_message(message.chat.id, "📢 **Broadcast Control Panel**\n\nYahan se broadcast ON/OFF karein:", reply_markup=markup, parse_mode="Markdown")
+
+@bot.callback_query_handler(func=lambda call: call.data in ["bc_on", "bc_off"])
+def callback_broadcast(call):
+    global broadcast_mode
+    if call.from_user.id != ADMIN_ID: return
+    
+    if call.data == "bc_on":
+        broadcast_mode = True
+        users = load_users()
+        bot.edit_message_text(f"✅ **Broadcast Mode: ON**\n\nTotal Users: {len(users)}\nAb aap koi bhi Message, Photo ya Video bhejenge, toh wo sabhi users ko chala jayega.", call.message.chat.id, call.message.message_id, parse_mode="Markdown")
+    else:
+        broadcast_mode = False
+        bot.edit_message_text("❌ **Broadcast Mode: OFF**\n\nBot ab normal mode me kaam kar raha hai.", call.message.chat.id, call.message.message_id, parse_mode="Markdown")
+
+# ---------- Main Message Handler (Broadcast + Uploads) ----------
+@bot.message_handler(content_types=['text', 'photo', 'video', 'document', 'audio'])
+def handle_all_messages(message):
+    global broadcast_mode
+    
+    # 1. BROADCAST CHECK (Agar ON hai aur Admin ne bheja hai)
+    if broadcast_mode and message.from_user.id == ADMIN_ID:
+        users = load_users()
+        if not users:
+            bot.reply_to(message, "❌ Koi user nahi mila database me.")
+            return
+        
+        bot.reply_to(message, f"🚀 Broadcasting to {len(users)} users... Please wait.")
+        success = 0
+        for uid in users:
+            try:
+                bot.copy_message(uid, message.chat.id, message.message_id)
+                success += 1
+                time.sleep(0.05) # Telegram Rate Limit se bachne ke liye
+            except Exception as e:
+                print(f"Failed to send to {uid}: {e}")
+        
+        bot.send_message(message.chat.id, f"✅ **Broadcast Complete!**\nSent to {success} users successfully.")
+        broadcast_mode = False # Kaam khatam, auto-off
+        return
+
+    # 2. NORMAL UPLOAD CHECK
+    if message.from_user.id != ADMIN_ID:
+        if message.content_type in ['photo', 'video']:
+            bot.reply_to(message, "❌ Access Denied!\nAap is bot par video upload nahi kar sakte.")
+        return
+
+    if message.content_type not in ['photo', 'video']:
+        return # Normal text ignore karega
+
+    if not message.media_group_id:
+        bot.reply_to(message, "⚠️ Please send the Photo and Video **together** as an album.")
+        return
+        
+    mgid = message.media_group_id
+    with buffer_lock:
+        media_buffer.setdefault(mgid, []).append(message)
+    threading.Timer(3.0, process_upload, args=[mgid, message.chat.id]).start()
+
+# ---------- Bot Start Handler ----------
 @bot.message_handler(commands=['start'])
 def handle_start(message):
+    save_user(message.chat.id) # Naye user ko save karein
+    
     args = message.text.split()
     if len(args) > 1:
         try:
@@ -69,18 +159,15 @@ def handle_start(message):
             video_db = load_db()
             entry = video_db.get(unique_id)
             
-            # 1. Agar JSON me data hai, toh direct file_id se bhejein
             if entry and "video" in entry:
                 sent_video = bot.send_video(chat_id, entry["video"])
             else:
-                # 2. Agar JSON delete ho gaya, toh Storage Channel se copy karein
                 sent_video = bot.copy_message(
                     chat_id=chat_id, 
                     from_chat_id=STORAGE_CHANNEL, 
                     message_id=int(unique_id)
                 )
             
-            # Timer Start (10 minutes)
             timer = threading.Thread(
                 target=delete_message_after_delay, 
                 args=(chat_id, sent_video.message_id, 600)
@@ -90,20 +177,10 @@ def handle_start(message):
             
         except Exception as e:
             bot.send_message(message.chat.id, "❌ Video not found or deleted.")
-            print(f"Error fetching: {e}")
     else:
         bot.send_message(message.chat.id, "👋 Welcome! Send me a Photo and Video **together** to generate a new link.")
 
-@bot.message_handler(content_types=["photo", "video"])
-def handle_bot_upload(message):
-    if not message.media_group_id:
-        bot.reply_to(message, "⚠️ Please send the Photo and Video **together** as an album.")
-        return
-    mgid = message.media_group_id
-    with buffer_lock:
-        media_buffer.setdefault(mgid, []).append(message)
-    threading.Timer(3.0, process_upload, args=[mgid, message.chat.id]).start()
-
+# ---------- Upload Processing ----------
 def process_upload(mgid, chat_id):
     with buffer_lock:
         msgs = media_buffer.pop(mgid, [])
@@ -116,26 +193,18 @@ def process_upload(mgid, chat_id):
         bot.send_message(chat_id, "❌ Error: Please send exactly 1 Photo and 1 Video together.")
         return
 
-    # 🟢 STEP 1: Original File IDs nikaalein
     original_video_id = video_msg.video.file_id
     original_photo_id = photo_msg.photo[-1].file_id
-    
-    # Default ID (Agar storage fail ho jaye)
     unique_id = str(int(time.time())) 
 
-    # 🟢 STEP 2: Storage Channel me bhejein (Koi error aaye toh rukein nahi)
     if STORAGE_CHANNEL != 0:
         try:
-            # vid_copy ek MessageId object return karta hai, isme .video nahi hota
             vid_copy = bot.copy_message(STORAGE_CHANNEL, chat_id, video_msg.message_id)
-            unique_id = str(vid_copy.message_id) # Naya ID
-            
+            unique_id = str(vid_copy.message_id) 
             bot.copy_message(STORAGE_CHANNEL, chat_id, photo_msg.message_id)
-            print("✅ Saved to Storage Channel")
         except Exception as e:
-            print(f"⚠️ Storage Channel Warning: {e} (Ignoring and moving forward)")
+            print(f"⚠️ Storage Channel Error: {e}")
 
-    # 🟢 STEP 3: JSON me Save karein
     try:
         video_db = load_db()
         video_db[unique_id] = {
@@ -143,11 +212,9 @@ def process_upload(mgid, chat_id):
             "thumb": original_photo_id
         }
         save_db(video_db)
-        print("✅ Saved to JSON")
     except Exception as e:
         print(f"⚠️ JSON Warning: {e}")
 
-    # 🟢 STEP 4: Destination Channel me post karein (Ye 100% chalega)
     bot_username = bot.get_me().username
     mini_app_url = f"https://t.me/{bot_username}/{APP_SHORT_NAME}?startapp={unique_id}"
 
@@ -158,10 +225,8 @@ def process_upload(mgid, chat_id):
     try:
         bot.send_photo(DEST_CHANNEL, original_photo_id, caption=caption_text, reply_markup=markup)
         bot.send_message(chat_id, f"✅ Uploaded successfully!\nYour Video ID is: `{unique_id}`", parse_mode="Markdown")
-        print("✅ Posted to Destination Channel")
     except Exception as e:
         bot.send_message(chat_id, f"❌ Dest Channel Error: {e}")
-        print(f"❌ Dest Error: {e}")
 
 # ---------- Flask Routes ----------
 @app.route("/health")
@@ -196,12 +261,11 @@ def get_thumbnail(vid_id):
         if not entry or "thumb" not in entry: abort(404)
         
         file_info = bot.get_file(entry["thumb"])
-        tg_url = f"https://api.telegram.org/bot{BOT_TOKEN}/getFile?file_id={entry['thumb']}"
-        # Direct redirect to telegram CDN for faster loading
-        file_path = file_info.file_path
-        return Response(requests.get(f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}", stream=True).iter_content(chunk_size=1024), content_type='image/jpeg')
+        tg_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}"
+        req = requests.get(tg_url, stream=True)
+        return Response(req.iter_content(chunk_size=1024), content_type='image/jpeg')
     except Exception:
-        abort(500)
+        abort(404)
 
 @app.route("/admin/set-webhook")
 def admin_set_webhook():
